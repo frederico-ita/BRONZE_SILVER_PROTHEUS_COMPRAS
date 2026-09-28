@@ -153,8 +153,72 @@ def test_empty_and_failure(sc7_config, record, monkeypatch):
         job.process_file("bronze", "compras/sc7/a.csv", sc7_config, Mock())
 
 
-def test_main_missing_key(monkeypatch):
+def test_main_missing_key_processes_prefix(monkeypatch, processing_env):
+    monkeypatch.setattr(job, "load_dotenv", Mock())
+    monkeypatch.delenv("SOURCE_KEY", raising=False)
+    monkeypatch.delenv("SOURCE_VERSION_ID", raising=False)
+    for name, value in processing_env.items():
+        monkeypatch.setenv(name, value)
+    session = Mock()
+    monkeypatch.setattr(job.boto3, "Session", Mock(return_value=session))
+    process = Mock(return_value=12)
+    monkeypatch.setattr(job, "process_prefix", process)
+    assert job.main([]) == 12
+    assert process.call_args.args[0]["source_prefix"] == "compras/sc7/"
+    assert process.call_args.args[1] is session
+
+
+def test_version_requires_specific_file(monkeypatch):
     monkeypatch.setattr(job, "load_dotenv", Mock())
     monkeypatch.delenv("SOURCE_KEY", raising=False)
     with pytest.raises(SystemExit):
-        job.main([])
+        job.main(["--source-version-id", "version-1"])
+
+
+def test_main_rejects_other_bucket(monkeypatch, processing_env):
+    monkeypatch.setattr(job, "load_dotenv", Mock())
+    monkeypatch.delenv("SOURCE_VERSION_ID", raising=False)
+    for name, value in processing_env.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match="origem"):
+        job.main(["--source-bucket", "other"])
+
+
+def test_prefix_paginates_and_filters(sc7_config, monkeypatch):
+    session = Mock()
+    paginator = session.client.return_value.get_paginator.return_value
+    paginator.paginate.return_value = [
+        {"Contents": [{"Key": "compras/sc7/a.parquet"}, {"Key": "compras/sc7/a.csv"},
+                      {"Key": "compras/sc7/sub/"}]},
+        {}, {"Contents": [{"Key": "compras/sc7/sub/b.PARQUET"}]},
+    ]
+    process = Mock(side_effect=[2, 3])
+    monkeypatch.setattr(job, "process_file", process)
+    assert job.process_prefix(sc7_config, session) == 5
+    session.client.assert_called_once_with("s3")
+    session.client.return_value.get_paginator.assert_called_once_with("list_objects_v2")
+    paginator.paginate.assert_called_once_with(Bucket="bronze", Prefix="compras/sc7/")
+    assert [call.args[1] for call in process.call_args_list] == [
+        "compras/sc7/a.parquet", "compras/sc7/sub/b.PARQUET"]
+
+
+def test_empty_prefix(sc7_config, monkeypatch, capsys):
+    session = Mock()
+    session.client.return_value.get_paginator.return_value.paginate.return_value = [{}]
+    process = Mock()
+    monkeypatch.setattr(job, "process_file", process)
+    assert job.process_prefix(sc7_config, session) == 0
+    process.assert_not_called()
+    assert "Parquet processados: 0" in capsys.readouterr().out
+
+
+def test_prefix_stops_on_processing_error(sc7_config, monkeypatch):
+    session = Mock()
+    session.client.return_value.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "compras/sc7/a.parquet"}, {"Key": "compras/sc7/b.parquet"}]}
+    ]
+    process = Mock(side_effect=RuntimeError("Falha na leitura"))
+    monkeypatch.setattr(job, "process_file", process)
+    with pytest.raises(RuntimeError):
+        job.process_prefix(sc7_config, session)
+    process.assert_called_once()

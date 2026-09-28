@@ -29,8 +29,10 @@ Essas mesmas regras valem nas Variables do GitHub; o deploy envia os caminhos j�
 resolvidos ao Glue. ARTIFACTS_BUCKET aceita `nomebucket`, `nomebucket/pasta` ou `s3://nomebucket/pasta`.
 Por exemplo, `meu-bucket/scripts` publica em
 `s3://meu-bucket/scripts/releases/<job>/<commit>/<execução>/bronze_to_silver.py`.
-SOURCE_KEY informa o objeto a processar e pode ser substituída por --source-key.
-SOURCE_VERSION_ID é opcional.
+Sem SOURCE_KEY nem --source-key, o job processa todos os arquivos `.parquet` do
+SOURCE_PREFIX, incluindo subpastas, um por vez. Não é necessário informar `*.parquet`.
+SOURCE_KEY ou --source-key restringe a execução a um arquivo específico.
+SOURCE_VERSION_ID é opcional e só pode ser usado com um arquivo específico.
 
 Padrões configuráveis: MERGE_KEYS=r_e_c_n_o, DELETION_COLUMN=d_e_l_e_t_d,
 DATE_COLUMN=extraction_date, DATE_FORMAT=ISO8601, CSV_SEPARATOR=";",
@@ -52,10 +54,12 @@ Na raiz do projeto:
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python -m pytest --cov=jobs --cov-report=term-missing
+.\.venv\Scripts\python jobs/bronze_to_silver.py
 .\.venv\Scripts\python jobs/bronze_to_silver.py --source-key compras/sc7/arquivo.csv
 ```
 
-A última linha acessa a AWS e altera a silver. Os testes usam somente dados sintéticos,
+As duas últimas linhas acessam a AWS e alteram a silver: a primeira lê os Parquets do
+prefixo; a segunda lê somente o arquivo informado. Os testes usam somente dados sintéticos,
 mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 
 ## Regras SC7
@@ -71,7 +75,13 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 - Se sua origem usa D_E_L_E_T_, configure DELETION_COLUMN=d_e_l_e_t.
 - Uma tabela silver deve receber uma única origem física de SC7, evitando colisões de RECNO.
 
-Formatos: CSV, Parquet, JSON tabular, JSONL e NDJSON. Cada execução lê somente o objeto informado.
+Um arquivo específico pode ser CSV, Parquet, JSON tabular, JSONL ou NDJSON.
+No modo por prefixo, somente Parquets são selecionados, com listagem paginada do S3.
+Um prefixo sem Parquets termina sem escrita e informa zero arquivos processados.
+Falhas interrompem a execução; arquivos já processados não são revertidos. A deduplicação
+continua por arquivo e não garante prioridade da extraction_date entre arquivos diferentes.
+Para rodar todos pelo console do Glue, publique o código atualizado e clique em Run sem
+o parâmetro --source-key. Se esse parâmetro foi cadastrado manualmente, remova-o.
 Buckets, banco Glue e workgroup Athena engine 3 precisam existir. A tabela Iceberg é criada
 no primeiro merge de ativos. Origem, destino, staging e resultados usam prefixos separados.
 
@@ -127,7 +137,8 @@ seu papel de execução. A role informada deve permitir que `glue.amazonaws.com`
 Para o teste manual: `glue:StartJobRun` e `glue:GetJobRun`. Políticas de bucket e KMS,
 se presentes, também precisam autorizar esse acesso.
 
-O papel do Glue precisa ler o script e a bronze, gravar/ler/apagar staging e dados silver,
+O papel do Glue precisa de `s3:ListBucket` no bucket bronze para listar o prefixo,
+ler o script e os objetos bronze, gravar/ler/apagar staging e dados silver,
 executar consultas no workgroup Athena, gerenciar tabelas e tabelas temporárias no banco
 Glue e escrever logs no CloudWatch. Lake Formation e SSE-KMS exigem suas permissões
 correspondentes. O deploy não altera essas permissões.

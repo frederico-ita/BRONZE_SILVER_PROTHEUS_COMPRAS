@@ -160,6 +160,22 @@ def process_file(bucket, key, config, session, version_id=None):
     return len(active)
 
 
+def process_prefix(config, session):
+    """Processa os Parquets do prefixo, inclusive subpastas, um por vez."""
+    bucket = config["source_bucket"]
+    pages = session.client("s3").get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=config["source_prefix"]
+    )
+    files, rows = 0, 0
+    for page in pages:
+        for item in page.get("Contents", []):
+            if item["Key"].lower().endswith(".parquet"):
+                rows += process_file(bucket, item["Key"], config, session)
+                files += 1
+    print(f"Arquivos Parquet processados: {files}; registros enviados ao merge: {rows}")
+    return rows
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=".env")
@@ -174,12 +190,16 @@ def main(argv=None):
         if value is not None:
             os.environ[name] = value
     key = args.source_key or os.getenv("SOURCE_KEY")
-    if not key:
-        parser.error("Informe --source-key ou SOURCE_KEY")
+    version = args.source_version_id or os.getenv("SOURCE_VERSION_ID")
+    if version and not key:
+        parser.error("SOURCE_VERSION_ID exige um arquivo específico em --source-key ou SOURCE_KEY")
     config = load_config()
+    if args.source_bucket and args.source_bucket != config["source_bucket"]:
+        raise ValueError("Objeto fora da origem configurada")
     session = boto3.Session(region_name=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"))
-    return process_file(args.source_bucket or config["source_bucket"], key, config, session,
-                        args.source_version_id or os.getenv("SOURCE_VERSION_ID"))
+    if key:
+        return process_file(config["source_bucket"], key, config, session, version)
+    return process_prefix(config, session)
 
 
 if __name__ == "__main__":  # pragma: no cover
