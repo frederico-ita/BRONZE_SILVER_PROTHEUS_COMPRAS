@@ -112,6 +112,8 @@ def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
     monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=source))
     monkeypatch.setattr(job.wr.catalog, "does_table_exist", Mock(return_value=True))
     def merge(**kw):
+        assert "c7_tipo" not in kw["df"].columns
+        assert "c7_tipo" not in kw["dtype"]
         assert kw["partition_cols"] == ["year", "month", "day"]
         assert kw["merge_cols"] == ["r_e_c_n_o"]
         assert kw["merge_condition"] == "update"

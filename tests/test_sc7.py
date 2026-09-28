@@ -46,3 +46,16 @@ def test_sc7_schema_and_no_mutation(sc7_config, record):
     assert sc7_config["merge_keys"] == ["r_e_c_n_o"]
 
 
+@pytest.mark.parametrize("value", [1, 1.0, "1", None])
+def test_c7_tipo_discarded_before_validation(sc7_config, record, value):
+    record["C7_TIPO"] = value
+    result = job.transform_file(pd.DataFrame([record]), sc7_config)
+    assert "c7_tipo" not in result.columns
+    assert "c7_tipo" not in sc7_config["dtype"]
+
+
+def test_c7_tipo_not_required(sc7_config, record):
+    record.pop("C7_TIPO")
+    assert len(job.transform_file(pd.DataFrame([record]), sc7_config)) == 1
+
+

@@ -19,7 +19,7 @@ DEFAULTS = {
 }
 REQUIRED = "SOURCE_BUCKET SOURCE_PREFIX DATABASE TABLE TABLE_LOCATION TEMP_PATH S3_OUTPUT WORKGROUP".split()
 PROCESSING_ENV_KEYS = [*REQUIRED, *DEFAULTS]
-CODES = "c7_filial c7_tipo c7_num c7_item c7_produto c7_numsc c7_local c7_fornece c7_loja".split()
+CODES = "c7_filial c7_num c7_item c7_produto c7_numsc c7_local c7_fornece c7_loja".split()
 NUMBERS = "c7_quant c7_quje c7_preco c7_total".split()
 DATES = ["c7_emissao", "c7_datprf"]
 
@@ -105,6 +105,7 @@ def transform_file(frame, config):
     frame.columns = [snake_case(col) for col in frame.columns]
     if frame.columns.duplicated().any() or any(not col for col in frame.columns):
         raise ValueError("Nomes de colunas inválidos ou duplicados")
+    frame = frame.drop(columns=["c7_tipo"], errors="ignore")
     for col in frame.select_dtypes(include=["object", "string"]):
         frame[col] = frame[col].map(clean_value)
     for col in CODES + [config["deletion_column"]]:
