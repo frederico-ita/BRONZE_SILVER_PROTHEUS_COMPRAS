@@ -86,11 +86,14 @@ No GitHub, configure o environment `production` com estes Secrets:
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SESSION_TOKEN`, apenas se as credenciais forem temporárias.
 
-Configure as Variables `AWS_REGION`, `GLUE_JOB_NAME`, `ARTIFACTS_BUCKET` e todas as
+Configure em Variables ou Secrets `AWS_REGION`, `GLUE_JOB_NAME`, `ARTIFACTS_BUCKET` e todas as
 variáveis obrigatórias de processamento listadas acima. As opcionais podem ser configuradas
 com os mesmos nomes; na ausência, o workflow aplica os padrões SC7.
 O `.env` pessoal não é publicado nem lido pelo deploy; suas configurações precisam ser
-cadastradas no GitHub. Não coloque credenciais nas Variables de processamento.
+cadastradas no GitHub. O workflow aceita as configurações de processamento em Secrets
+também, com prioridade para Variables quando o mesmo nome existe nos dois lugares.
+Credenciais AWS continuam exclusivamente em Secrets. Antes de autenticar, o workflow
+valida os campos obrigatórios e informa somente os nomes ausentes, sem imprimir valores.
 
 Após testes aprovados, um push em `main` publica somente o script em um caminho S3
 por commit/execução e atualiza o job existente. O deploy instala as dependências fixadas

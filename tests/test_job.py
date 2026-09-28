@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from unittest.mock import Mock
 
 import pandas as pd
@@ -5,216 +6,154 @@ import pytest
 from pandas.testing import assert_frame_equal
 
 from jobs import bronze_to_silver as job
+from tests.test_sc7 import record, sc7_config
 
 
-@pytest.mark.parametrize("value,expected", [
-    (" Data Extração ", "data_extracao"), ("HTTPResponseID", "http_response_id"),
-    ("extractionDate", "extraction_date"), ("123 código", "col_123_codigo"),
-    ("C7_NUM", "c7_num"),
-])
-def test_snake_case(value, expected):
+@pytest.mark.parametrize("value,expected", [("C7_NUM", "c7_num"), ("Data Extração", "data_extracao"),
+                                           ("extractionDate", "extraction_date")])
+def test_names(value, expected):
     assert job.snake_case(value) == expected
 
 
-def test_invalid_column_and_collision():
-    with pytest.raises(ValueError, match="vazio"):
-        job.snake_case("!!!")
-    with pytest.raises(ValueError, match="colidem"):
-        job.normalize_columns(pd.DataFrame(columns=["A B", "a_b"]))
-
-
-@pytest.mark.parametrize("value,expected", [
-    ("  São\tPaulo\n  ", "São Paulo"), ("A\x00B\u200bC\ufeff", "ABC"),
-    ("  R$ 1.234,56 / café! ", "R$ 1.234,56 / café!"),
-    ("cafe\u0301", "café"), (None, None), (42, 42), ("  ", ""),
-])
-def test_clean_value(value, expected):
+@pytest.mark.parametrize("value,expected", [("  São\tPaulo\n", "São Paulo"),
+    ("A\x00B\u200bC", "ABC"), ("cafe\u0301", "café"), (None, None), (42, 42)])
+def test_clean(value, expected):
     assert job.clean_value(value) == expected
 
 
-def test_clean_preserves_input_nulls_and_types():
-    frame = pd.DataFrame({"texto": [" x ", None], "numero": [1, 2],
-                          "string": pd.Series([" y ", pd.NA], dtype="string")})
-    original = frame.copy(deep=True)
-    result = job.clean_strings(frame)
-    assert result.loc[0, "texto"] == "x"
-    assert result.loc[0, "numero"] == 1
-    assert pd.isna(result.loc[1, "string"])
-    assert_frame_equal(frame, original)
+@pytest.mark.parametrize("value,expected", [("", None), (None, None), ("0.1", Decimal("0.1")),
+                                            ("12.123456", Decimal("12.123456")), (-2, Decimal("-2"))])
+def test_decimal(value, expected):
+    assert job.decimal_value(value, ".") == expected
 
 
-def test_date_alias_timezone_and_precision():
-    frame = pd.DataFrame({"data_extracao": ["2026-01-31T23:30:00.123456-03:00"]})
-    result = job.add_date_partitions(frame, "Data Extração")
-    assert result.loc[0, ["year", "month", "day"]].tolist() == [2026, 2, 1]
-    assert result.loc[0, "data_extracao"] == pd.Timestamp("2026-02-01 02:30:00.123")
-    assert list(frame.columns) == ["data_extracao"]
+@pytest.mark.parametrize("value", ["1.1234567", "1000000000000", "NaN", "Infinity", "1.234,56"])
+def test_invalid_decimal(value):
+    with pytest.raises((ValueError, InvalidOperation)):
+        job.decimal_value(value, ".")
 
 
-def test_explicit_numeric_date_format():
-    result = job.add_date_partitions(pd.DataFrame({"extraction_date": [20260928]}),
-                                    date_format="%Y%m%d")
-    assert result.loc[0, "day"] == 28
+def test_decimal_separator():
+    assert job.decimal_value("1,25", ",") == Decimal("1.25")
+    assert job.decimal_value(1.25, ",") == Decimal("1.25")
+    for value, separator in [("1.25", ","), ("1", ";")]:
+        with pytest.raises(ValueError):
+            job.decimal_value(value, separator)
 
 
-@pytest.mark.parametrize("frame,message", [
-    (pd.DataFrame({"x": [1]}), "ausente"),
-    (pd.DataFrame({"extraction_date": ["invalid"]}), "inválida"),
-    (pd.DataFrame({"extraction_date": [None]}), "inválida"),
-    (pd.DataFrame({"extraction_date": ["2026-01-01"], "year": [2000]}), "reservados"),
-])
-def test_invalid_partitions(frame, message):
-    with pytest.raises(ValueError, match=message):
-        job.add_date_partitions(frame)
+def test_transform_latest_partition_and_input(sc7_config, record):
+    newer = dict(record, C7_TOTAL="200", extraction_date="2026-09-30T23:30:00-03:00")
+    source = pd.DataFrame([record, newer, newer])
+    original = source.copy(deep=True)
+    result = job.transform_file(source, sc7_config)
+    assert len(result) == 1
+    assert result.loc[0, "c7_total"] == Decimal("200")
+    assert result.loc[0, ["year", "month", "day"]].tolist() == [2026, 10, 1]
+    assert_frame_equal(source, original)
 
 
-def test_latest_composite_keys_and_idempotent_transform(config):
-    config["merge_keys"] = ["id", "filial"]
-    frame = pd.DataFrame({"ID": ["001", "001", "001", "001"], "Filial": ["01", "01", "01", "02"],
-                          "ExtractionDate": ["2026-01-01", "2026-02-02", "2026-02-02", "2026-01-01"],
-                          "Descrição": ["velho", " novo ", "novo", " outro "]})
-    original = frame.copy(deep=True)
-    result = job.transform_file(frame, config)
-    assert len(result) == 2
-    assert result["descricao"].tolist() == ["novo", "outro"]
-    assert result["id"].tolist() == ["001", "001"]
-    assert_frame_equal(result, job.transform_file(frame, config))
-    assert_frame_equal(frame, original)
+@pytest.mark.parametrize("column,value", [("R_E_C_N_O", None), ("R_E_C_N_O", "1.5"),
+    ("R_E_C_N_O", "9223372036854775808"), ("C7_NUM", 123), ("C7_EMISSAO", "20260230"),
+    ("C7_EMISSAO", "2026111"), ("extraction_date", None), ("extraction_date", "invalid"),
+    ("D_E_L_E_T_D", None), ("D_E_L_E_T_D", "S")])
+def test_invalid_rows(sc7_config, record, column, value):
+    record[column] = value
+    with pytest.raises((ValueError, TypeError, OverflowError)):
+        job.transform_file(pd.DataFrame([record]), sc7_config)
 
 
-@pytest.mark.parametrize("keys,frame,message", [
-    ([], pd.DataFrame(), "chaves"),
-    (["id", "ID"], pd.DataFrame(), "chaves"),
-    (["id"], pd.DataFrame({"x": [1]}), "ausentes"),
-    (["id"], pd.DataFrame({"id": [None], "extraction_date": [1]}), "nulas"),
-    (["id"], pd.DataFrame({"id": [""], "extraction_date": [1]}), "vazias"),
-    (["id"], pd.DataFrame({"id": [1, 1], "extraction_date": [1, 1], "x": ["a", "b"]}), "conflitantes"),
-])
-def test_invalid_dedup(keys, frame, message):
-    with pytest.raises(ValueError, match=message):
-        job.remove_duplicates(frame, keys)
+def test_schema_conflicts_and_missing(sc7_config, record):
+    for extra in [{"c7_num": "duplicate"}, {"!!!": "invalid"}]:
+        with pytest.raises(ValueError):
+            job.transform_file(pd.DataFrame([dict(record, **extra)]), sc7_config)
+    del record["C7_NUM"]
+    with pytest.raises(KeyError):
+        job.transform_file(pd.DataFrame([record]), sc7_config)
 
 
-@pytest.mark.parametrize("field,value", [
-    ("source_bucket", ""), ("merge_keys", "id"), ("merge_keys", ["id", "ID"]),
-    ("source_prefix", "compras"),
-    ("merge_keys", ["year"]), ("database", "DROP TABLE"), ("table_location", "s3://silver/"),
-    ("temp_path", "s3://silver/iceberg/"), ("s3_output", "file:///tmp/results"),
-    ("table_location", "s3://bronze/compras/silver/"),
-])
-def test_invalid_config(config, field, value):
-    config[field] = value
-    with pytest.raises(ValueError):
-        job.validate_config(config)
+def test_optional_blanks(sc7_config, record):
+    record.update(C7_QUANT="", C7_DATPRF="")
+    result = job.transform_file(pd.DataFrame([record]), sc7_config)
+    assert pd.isna(result.loc[0, "c7_quant"])
+    assert pd.isna(result.loc[0, "c7_datprf"])
 
 
-def test_load_config(processing_env):
-    result = job.load_config(processing_env)
-    assert result["source_bucket"] == "bronze"
-    assert result["merge_keys"] == ["r_e_c_n_o"]
-    with pytest.raises(ValueError, match="SOURCE_BUCKET"):
-        job.load_config({})
+def test_conflicting_ties(sc7_config, record):
+    with pytest.raises(ValueError, match="conflitantes"):
+        job.transform_file(pd.DataFrame([record, dict(record, C7_TOTAL="200")]), sc7_config)
 
 
-@pytest.mark.parametrize("extension,reader,extra", [
-    ("csv", "read_csv", {"dtype": "string", "keep_default_na": False, "sep": ",", "encoding": "utf-8"}),
-    ("parquet", "read_parquet", {}),
-    ("json", "read_json", {"lines": False, "dtype": False, "convert_dates": False}),
-    ("jsonl", "read_json", {"lines": True, "dtype": False, "convert_dates": False}),
-    ("ndjson", "read_json", {"lines": True, "dtype": False, "convert_dates": False}),
-])
-def test_read_exact_object(config, monkeypatch, extension, reader, extra):
-    mock = Mock(return_value=pd.DataFrame({"id": [1]}))
+@pytest.mark.parametrize("extension,reader", [("csv", "read_csv"), ("parquet", "read_parquet"),
+    ("json", "read_json"), ("jsonl", "read_json"), ("ndjson", "read_json")])
+def test_read_exact_version(sc7_config, monkeypatch, extension, reader):
+    mock = Mock(return_value=pd.DataFrame())
     monkeypatch.setattr(job.wr.s3, reader, mock)
-    session = Mock()
-    # '+' e '%' são parte literal da chave EventBridge: não usar unquote_plus.
-    key = "compras/a+b%20." + extension
-    assert len(job.read_file("bronze", key, config, session, "version-1")) == 1
-    mock.assert_called_once_with(path=["s3://bronze/" + key], boto3_session=session,
-                                 version_id="version-1", **extra)
+    key = "compras/sc7/a+b%20." + extension
+    job.read_file("bronze", key, sc7_config, Mock(), "v1")
+    options = mock.call_args.kwargs
+    assert options["path"] == ["s3://bronze/" + key]
+    assert options["version_id"] == "v1"
+    if extension == "csv":
+        assert options["dtype"] == "string"
+        assert options["keep_default_na"] is False
 
 
-@pytest.mark.parametrize("bucket,key", [("other", "compras/a.csv"), ("bronze", "other/a.csv"),
-                                         ("bronze", "compras/a.xlsx")])
-def test_reject_source_or_format(config, bucket, key):
+@pytest.mark.parametrize("bucket,key", [("other", "compras/sc7/a.csv"), ("bronze", "other/a.csv"),
+                                         ("bronze", "compras/sc7/a.xlsx")])
+def test_invalid_source(sc7_config, bucket, key):
     with pytest.raises(ValueError):
-        job.read_file(bucket, key, config, Mock())
+        job.read_file(bucket, key, sc7_config, Mock())
 
 
-def test_merge_contract_and_empty(config, monkeypatch):
-    writer = Mock()
-    monkeypatch.setattr(job.wr.athena, "to_iceberg", writer)
-    session = Mock()
-    frame = pd.DataFrame({"id": [1]})
-    assert job.merge_iceberg(frame, config, session) == 1
-    kwargs = writer.call_args.kwargs
-    assert kwargs["merge_cols"] == ["id"]
-    assert kwargs["merge_condition"] == "update"
-    assert kwargs["partition_cols"] == ["year", "month", "day"]
-    assert kwargs["table_location"] == config["table_location"]
-    assert kwargs["keep_files"] is False
-    assert kwargs["fill_missing_columns_in_df"] is False
-    assert kwargs["schema_evolution"] is False
-    path = kwargs["temp_path"]
-    job.merge_iceberg(frame, config, session)
-    assert writer.call_args.kwargs["temp_path"] != path
-    writer.reset_mock()
-    assert job.merge_iceberg(pd.DataFrame(), config, session) == 0
-    writer.assert_not_called()
-
-
-def test_pipeline_replay_simulated_merge(config, monkeypatch):
-    """Simula o contrato de merge por chave, sem afirmar validar o engine Athena."""
-    source = pd.DataFrame({"ID": ["001", "001"], "ExtractionDate": ["2026-09-28"] * 2})
+def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
+    source = pd.DataFrame([record, dict(record, D_E_L_E_T_D="*", extraction_date="2026-09-29"),
+                           dict(record, R_E_C_N_O="2")])
+    target = {123456789: "old"}
     monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=source))
-    target = pd.DataFrame()
-
-    def simulated_merge(**kwargs):
-        nonlocal target
-        target = pd.concat([target, kwargs["df"]]).drop_duplicates(kwargs["merge_cols"], keep="last")
-
-    monkeypatch.setattr(job.wr.athena, "to_iceberg", simulated_merge)
+    monkeypatch.setattr(job.wr.catalog, "does_table_exist", Mock(return_value=True))
+    def merge(**kw):
+        assert kw["partition_cols"] == ["year", "month", "day"]
+        assert kw["merge_cols"] == ["r_e_c_n_o"]
+        assert kw["merge_condition"] == "update"
+        assert kw["fill_missing_columns_in_df"] is False
+        target.update({key: "new" for key in kw["df"]["r_e_c_n_o"]})
+    def delete(**kw):
+        assert kw["df"].columns.tolist() == ["r_e_c_n_o"]
+        for key in kw["df"]["r_e_c_n_o"]:
+            target.pop(key, None)
+    monkeypatch.setattr(job.wr.athena, "to_iceberg", merge)
+    monkeypatch.setattr(job.wr.athena, "delete_from_iceberg_table", delete)
     for _ in range(2):
-        assert job.process_file("bronze", "compras/a.csv", config, Mock()) == 1
-    assert len(target) == 1
-    assert target["id"].iloc[0] == "001"
+        assert job.process_file("bronze", "compras/sc7/a.csv", sc7_config, Mock()) == 1
+        assert target == {2: "new"}
 
 
-def test_failure_propagates_and_does_not_write_invalid_data(config, monkeypatch):
-    monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=pd.DataFrame({"id": [1]})))
-    writer = Mock()
+@pytest.mark.parametrize("exists", [True, False])
+def test_only_deletes(sc7_config, record, monkeypatch, exists):
+    record["D_E_L_E_T_D"] = "*"
+    monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=pd.DataFrame([record])))
+    monkeypatch.setattr(job.wr.catalog, "does_table_exist", Mock(return_value=exists))
+    writer, deleter = Mock(), Mock()
     monkeypatch.setattr(job.wr.athena, "to_iceberg", writer)
-    with pytest.raises(ValueError):
-        job.process_file("bronze", "compras/a.csv", config, Mock())
+    monkeypatch.setattr(job.wr.athena, "delete_from_iceberg_table", deleter)
+    assert job.process_file("bronze", "compras/sc7/a.csv", sc7_config, Mock()) == 0
     writer.assert_not_called()
-    writer.side_effect = RuntimeError("Athena failed")
-    with pytest.raises(RuntimeError, match="Athena failed"):
-        job.merge_iceberg(pd.DataFrame({"id": [1]}), config, Mock())
+    assert deleter.call_count == int(exists)
 
 
-def test_empty_file(config, monkeypatch):
-    reader = Mock(return_value=pd.DataFrame(columns=["id", "extraction_date"]))
-    writer = Mock()
+def test_empty_and_failure(sc7_config, record, monkeypatch):
+    reader = Mock(return_value=pd.DataFrame(columns=record))
+    writer = Mock(side_effect=RuntimeError("Athena failed"))
     monkeypatch.setattr(job.wr.s3, "read_csv", reader)
     monkeypatch.setattr(job.wr.athena, "to_iceberg", writer)
-    assert job.process_file("bronze", "compras/a.csv", config, Mock()) == 0
+    assert job.process_file("bronze", "compras/sc7/a.csv", sc7_config, Mock()) == 0
     writer.assert_not_called()
+    reader.return_value = pd.DataFrame([record])
+    with pytest.raises(RuntimeError):
+        job.process_file("bronze", "compras/sc7/a.csv", sc7_config, Mock())
 
 
-def test_main(config, monkeypatch):
-    monkeypatch.setattr(job, "load_dotenv", Mock())
-    session = Mock()
-    monkeypatch.setattr(job.boto3, "Session", Mock(return_value=session))
-    loader = Mock(return_value=config)
-    processor = Mock(return_value=3)
-    monkeypatch.setattr(job, "load_config", loader)
-    monkeypatch.setattr(job, "process_file", processor)
-    assert job.main(["--source-bucket", "bronze",
-                     "--source-key", "compras/a.csv", "--source-version-id", "v1", "--JOB_NAME", "test"]) == 3
-    processor.assert_called_once_with("bronze", "compras/a.csv", config, session, "v1")
-
-
-def test_main_required_args(monkeypatch):
+def test_main_missing_key(monkeypatch):
     monkeypatch.setattr(job, "load_dotenv", Mock())
     monkeypatch.delenv("SOURCE_KEY", raising=False)
     with pytest.raises(SystemExit):

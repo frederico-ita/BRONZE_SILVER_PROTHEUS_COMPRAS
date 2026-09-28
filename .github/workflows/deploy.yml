@@ -46,27 +46,27 @@ jobs:
     timeout-minutes: 75
     environment: production
     env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      GLUE_JOB_NAME: ${{ vars.GLUE_JOB_NAME }}
-      ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
-      SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET || vars.BRONZE_BUCKET }}
-      SILVER_BUCKET: ${{ vars.SILVER_BUCKET }}
-      SOURCE_PREFIX: ${{ vars.SOURCE_PREFIX }}
-      DATABASE: ${{ vars.DATABASE }}
-      TABLE: ${{ vars.TABLE }}
-      TABLE_LOCATION: ${{ vars.TABLE_LOCATION }}
-      TEMP_PATH: ${{ vars.TEMP_PATH }}
-      S3_OUTPUT: ${{ vars.S3_OUTPUT }}
-      WORKGROUP: ${{ vars.WORKGROUP }}
-      MERGE_KEYS: ${{ vars.MERGE_KEYS || 'r_e_c_n_o' }}
-      DELETION_COLUMN: ${{ vars.DELETION_COLUMN || 'd_e_l_e_t_d' }}
-      DATE_COLUMN: ${{ vars.DATE_COLUMN || 'extraction_date' }}
-      DATE_FORMAT: ${{ vars.DATE_FORMAT || 'ISO8601' }}
-      CSV_SEPARATOR: ${{ vars.CSV_SEPARATOR || ';' }}
-      ENCODING: ${{ vars.ENCODING || 'utf-8' }}
-      DECIMAL_SEPARATOR: ${{ vars.DECIMAL_SEPARATOR || '.' }}
-      C7_EMISSAO_FORMAT: ${{ vars.C7_EMISSAO_FORMAT || '%Y%m%d' }}
-      C7_DATPRF_FORMAT: ${{ vars.C7_DATPRF_FORMAT || '%Y%m%d' }}
+      AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+      GLUE_JOB_NAME: ${{ vars.GLUE_JOB_NAME || secrets.GLUE_JOB_NAME }}
+      ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET || secrets.ARTIFACTS_BUCKET }}
+      SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET || secrets.SOURCE_BUCKET || vars.BRONZE_BUCKET || secrets.BRONZE_BUCKET }}
+      SILVER_BUCKET: ${{ vars.SILVER_BUCKET || secrets.SILVER_BUCKET }}
+      SOURCE_PREFIX: ${{ vars.SOURCE_PREFIX || secrets.SOURCE_PREFIX }}
+      DATABASE: ${{ vars.DATABASE || secrets.DATABASE }}
+      TABLE: ${{ vars.TABLE || secrets.TABLE }}
+      TABLE_LOCATION: ${{ vars.TABLE_LOCATION || secrets.TABLE_LOCATION }}
+      TEMP_PATH: ${{ vars.TEMP_PATH || secrets.TEMP_PATH }}
+      S3_OUTPUT: ${{ vars.S3_OUTPUT || secrets.S3_OUTPUT }}
+      WORKGROUP: ${{ vars.WORKGROUP || secrets.WORKGROUP }}
+      MERGE_KEYS: ${{ vars.MERGE_KEYS || secrets.MERGE_KEYS || 'r_e_c_n_o' }}
+      DELETION_COLUMN: ${{ vars.DELETION_COLUMN || secrets.DELETION_COLUMN || 'd_e_l_e_t_d' }}
+      DATE_COLUMN: ${{ vars.DATE_COLUMN || secrets.DATE_COLUMN || 'extraction_date' }}
+      DATE_FORMAT: ${{ vars.DATE_FORMAT || secrets.DATE_FORMAT || 'ISO8601' }}
+      CSV_SEPARATOR: ${{ vars.CSV_SEPARATOR || secrets.CSV_SEPARATOR || ';' }}
+      ENCODING: ${{ vars.ENCODING || secrets.ENCODING || 'utf-8' }}
+      DECIMAL_SEPARATOR: ${{ vars.DECIMAL_SEPARATOR || secrets.DECIMAL_SEPARATOR || '.' }}
+      C7_EMISSAO_FORMAT: ${{ vars.C7_EMISSAO_FORMAT || secrets.C7_EMISSAO_FORMAT || '%Y%m%d' }}
+      C7_DATPRF_FORMAT: ${{ vars.C7_DATPRF_FORMAT || secrets.C7_DATPRF_FORMAT || '%Y%m%d' }}
       RUN_SOURCE_KEY: ${{ inputs.source_key }}
       RUN_SOURCE_VERSION_ID: ${{ inputs.source_version_id }}
     steps:
@@ -76,6 +76,20 @@ jobs:
           python-version: '3.9'
           cache: pip
       - run: python -m pip install -r requirements.txt
+      - name: Validate deployment configuration
+        run: |
+          python - <<'PY'
+          import os
+          from jobs.bronze_to_silver import load_config
+          required = ["AWS_REGION", "GLUE_JOB_NAME", "ARTIFACTS_BUCKET",
+                      "SOURCE_BUCKET", "SOURCE_PREFIX", "DATABASE", "TABLE",
+                      "TABLE_LOCATION", "TEMP_PATH", "S3_OUTPUT", "WORKGROUP"]
+          missing = [key for key in required if not os.getenv(key, "").strip()]
+          if missing:
+              raise SystemExit("Configure em production (Variables ou Secrets): " + ", ".join(missing))
+          load_config()
+          print("Configuracao validada; valores omitidos.")
+          PY
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
