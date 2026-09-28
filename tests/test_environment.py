@@ -41,6 +41,40 @@ def test_example_environment_is_valid():
     assert config["table"] == "sc7_pedidos_compra"
 
 
+def test_separate_buckets_and_prefixes(processing_env):
+    processing_env.pop("SOURCE_BUCKET")
+    processing_env.update(BRONZE_BUCKET="bronze", SILVER_BUCKET="silver",
+                          TABLE_LOCATION="iceberg/sc7/", TEMP_PATH="/staging/sc7/",
+                          S3_OUTPUT="athena-results/")
+    config = job.load_config(processing_env)
+    assert config["source_bucket"] == "bronze"
+    assert config["table_location"] == "s3://silver/iceberg/sc7/"
+    assert config["temp_path"] == "s3://silver/staging/sc7/"
+    assert config["s3_output"] == "s3://silver/athena-results/"
+    assert "SOURCE_BUCKET" not in processing_env
+
+
+def test_explicit_bucket_and_full_uri_take_precedence(processing_env):
+    processing_env.update(BRONZE_BUCKET="other", SILVER_BUCKET="different")
+    config = job.load_config(processing_env)
+    assert config["source_bucket"] == "bronze"
+    assert config["table_location"] == processing_env["TABLE_LOCATION"]
+
+
+@pytest.mark.parametrize("path,bucket", [("iceberg/sc7/", None), ("iceberg/sc7/", " "),
+    ("iceberg/sc7/", "s3://silver"), ("iceberg/sc7/", "silver/prefix"),
+    ("https://other/path", "silver"), ("/", "silver")])
+def test_invalid_relative_path(path, bucket):
+    with pytest.raises(ValueError):
+        job.resolve_s3_path(path, bucket)
+
+
+def test_relative_overlapping_paths_rejected(processing_env):
+    processing_env.update(SILVER_BUCKET="silver", TABLE_LOCATION="data/", TEMP_PATH="data/staging/")
+    with pytest.raises(ValueError, match="separados"):
+        job.load_config(processing_env)
+
+
 def test_local_dotenv_precedence_and_credentials_not_in_config(tmp_path, processing_env, monkeypatch):
     env_file = tmp_path / "synthetic.env"
     values = dict(processing_env, SOURCE_KEY="compras/sc7/local.csv", SOURCE_VERSION_ID="v2",

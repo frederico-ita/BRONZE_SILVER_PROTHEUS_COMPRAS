@@ -9,8 +9,24 @@ Complete seu .env usando .env.example como referência, sem sobrescrever suas cr
 O script agora usa variáveis de ambiente; não usa table.example.json nem configuração JSON no S3.
 O esquema das colunas fica em SC7_DTYPES, no script.
 
-Variáveis obrigatórias: SOURCE_BUCKET, SOURCE_PREFIX, DATABASE, TABLE,
+Variáveis obrigatórias: SOURCE_BUCKET (ou BRONZE_BUCKET), SOURCE_PREFIX, DATABASE, TABLE,
 TABLE_LOCATION, TEMP_PATH, S3_OUTPUT e WORKGROUP.
+Os três caminhos aceitam URIs completas ou prefixos separados do SILVER_BUCKET:
+
+```dotenv
+BRONZE_BUCKET=meu-bucket-bronze
+SILVER_BUCKET=meu-bucket-silver
+TABLE_LOCATION=iceberg/sc7/
+TEMP_PATH=staging/sc7/
+S3_OUTPUT=athena-results/
+```
+
+Nesse exemplo, TABLE_LOCATION vira `s3://meu-bucket-silver/iceberg/sc7/`.
+SILVER_BUCKET é obrigatório quando algum desses caminhos não começa com `s3://`.
+URIs completas são preservadas e podem apontar para buckets diferentes.
+SOURCE_BUCKET tem prioridade sobre BRONZE_BUCKET quando ambos estão definidos.
+Essas mesmas regras valem nas Variables do GitHub; o deploy envia os caminhos já
+resolvidos ao Glue. ARTIFACTS_BUCKET continua sendo somente o bucket do script.
 SOURCE_KEY informa o objeto a processar e pode ser substituída por --source-key.
 SOURCE_VERSION_ID é opcional.
 

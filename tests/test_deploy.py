@@ -87,6 +87,17 @@ def test_missing_deploy_variables():
         deploy.deploy(Mock(), {})
 
 
+def test_deploy_resolves_prefixes_before_passing_to_glue(processing_env):
+    processing_env.pop("SOURCE_BUCKET")
+    processing_env.update(BRONZE_BUCKET="bronze", SILVER_BUCKET="silver",
+                          TABLE_LOCATION="iceberg/sc7/", TEMP_PATH="staging/", S3_OUTPUT="results/")
+    arguments = deploy.processing_arguments(processing_env)
+    assert arguments["--env-SOURCE_BUCKET"] == "bronze"
+    assert arguments["--env-TABLE_LOCATION"] == "s3://silver/iceberg/sc7/"
+    assert arguments["--env-TEMP_PATH"] == "s3://silver/staging/"
+    assert arguments["--env-S3_OUTPUT"] == "s3://silver/results/"
+
+
 def test_run_success_and_poll():
     glue = Mock()
     glue.start_job_run.return_value = {"JobRunId": "jr_test"}

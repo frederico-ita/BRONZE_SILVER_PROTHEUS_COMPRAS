@@ -214,15 +214,34 @@ def validate_config(config):
     return config
 
 
+def resolve_s3_path(path, bucket=None):
+    """Aceita URI completa ou prefixo relativo ao bucket silver."""
+    path = path.strip()
+    if path.startswith("s3://"):
+        return path
+    if not bucket or not bucket.strip():
+        raise ValueError("SILVER_BUCKET é obrigatório para caminhos sem s3://")
+    bucket = bucket.strip()
+    if "/" in bucket or ":" in bucket:
+        raise ValueError("SILVER_BUCKET deve conter somente o nome do bucket")
+    if "://" in path or not path.strip("/"):
+        raise ValueError("Caminho deve ser um prefixo S3 não vazio")
+    return "s3://" + bucket + "/" + path.lstrip("/")
+
+
 def load_config(environ=None):
     """Lê somente configuração de processamento; credenciais ficam com o boto3."""
-    env = os.environ if environ is None else environ
+    env = dict(os.environ if environ is None else environ)
+    if not env.get("SOURCE_BUCKET", "").strip():
+        env["SOURCE_BUCKET"] = env.get("BRONZE_BUCKET", "")
     required = ["SOURCE_BUCKET", "SOURCE_PREFIX", "DATABASE", "TABLE",
                 "TABLE_LOCATION", "TEMP_PATH", "S3_OUTPUT", "WORKGROUP"]
     missing = [key for key in required if not env.get(key, "").strip()]
     if missing:
         raise ValueError("Variáveis de ambiente obrigatórias: " + ", ".join(missing))
     config = {key.lower(): env[key].strip() for key in required}
+    for key in ["table_location", "temp_path", "s3_output"]:
+        config[key] = resolve_s3_path(config[key], env.get("SILVER_BUCKET"))
     config.update({
         "merge_keys": [snake_case(key.strip()) for key in env.get("MERGE_KEYS", "r_e_c_n_o").split(",")],
         "deletion_column": snake_case(env.get("DELETION_COLUMN", "d_e_l_e_t_d")),

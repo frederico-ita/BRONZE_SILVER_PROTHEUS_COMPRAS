@@ -49,7 +49,8 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       GLUE_JOB_NAME: ${{ vars.GLUE_JOB_NAME }}
       ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
-      SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET }}
+      SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET || vars.BRONZE_BUCKET }}
+      SILVER_BUCKET: ${{ vars.SILVER_BUCKET }}
       SOURCE_PREFIX: ${{ vars.SOURCE_PREFIX }}
       DATABASE: ${{ vars.DATABASE }}
       TABLE: ${{ vars.TABLE }}
