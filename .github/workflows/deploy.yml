@@ -1,0 +1,85 @@
+name: Test and deploy Glue
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_key:
+        description: 'Opcional: objeto bronze para executar após deploy (altera a silver)'
+        required: false
+        type: string
+      source_version_id:
+        description: 'Opcional: versão do objeto S3'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: silver-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest --cov=jobs --cov=scripts --cov-report=term-missing --cov-report=xml
+        env:
+          AWS_EC2_METADATA_DISABLED: 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      GLUE_JOB_NAME: ${{ vars.GLUE_JOB_NAME }}
+      ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+      SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET }}
+      SOURCE_PREFIX: ${{ vars.SOURCE_PREFIX }}
+      DATABASE: ${{ vars.DATABASE }}
+      TABLE: ${{ vars.TABLE }}
+      TABLE_LOCATION: ${{ vars.TABLE_LOCATION }}
+      TEMP_PATH: ${{ vars.TEMP_PATH }}
+      S3_OUTPUT: ${{ vars.S3_OUTPUT }}
+      WORKGROUP: ${{ vars.WORKGROUP }}
+      MERGE_KEYS: ${{ vars.MERGE_KEYS || 'r_e_c_n_o' }}
+      DELETION_COLUMN: ${{ vars.DELETION_COLUMN || 'd_e_l_e_t_d' }}
+      DATE_COLUMN: ${{ vars.DATE_COLUMN || 'extraction_date' }}
+      DATE_FORMAT: ${{ vars.DATE_FORMAT || 'ISO8601' }}
+      CSV_SEPARATOR: ${{ vars.CSV_SEPARATOR || ';' }}
+      ENCODING: ${{ vars.ENCODING || 'utf-8' }}
+      DECIMAL_SEPARATOR: ${{ vars.DECIMAL_SEPARATOR || '.' }}
+      C7_EMISSAO_FORMAT: ${{ vars.C7_EMISSAO_FORMAT || '%Y%m%d' }}
+      C7_DATPRF_FORMAT: ${{ vars.C7_DATPRF_FORMAT || '%Y%m%d' }}
+      RUN_SOURCE_KEY: ${{ inputs.source_key }}
+      RUN_SOURCE_VERSION_ID: ${{ inputs.source_version_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Publish script and update existing Glue job
+        run: python -m scripts.deploy_glue

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.env
+.env.*
+!.env.example
+# Infraestrutura mantida somente localmente por enquanto.
+/infra/
