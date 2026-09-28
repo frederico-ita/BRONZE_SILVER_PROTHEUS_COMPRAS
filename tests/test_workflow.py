@@ -33,8 +33,13 @@ def workflow_deploy(tmp_path, monkeypatch, processing_env):
         yield compile(code, "deploy.yml", "exec"), glue, s3, model
 
 
-def test_create_when_missing(workflow_deploy):
+@pytest.mark.parametrize("destination,prefix", [
+    ("artifacts", ""), ("artifacts/scripts", "scripts/"),
+    ("artifacts/scripts/", "scripts/"), ("artifacts/glue/sc7", "glue/sc7/"),
+])
+def test_create_when_missing(workflow_deploy, destination, prefix):
     code, glue, s3, model = workflow_deploy
+    os.environ["ARTIFACTS_BUCKET"] = destination
     exec(code, {})
     request = glue.create_job.call_args.kwargs
     validate_parameters(request, model.operation_model("CreateJob").input_shape)
@@ -43,7 +48,9 @@ def test_create_when_missing(workflow_deploy):
     assert request["Role"].endswith(":role/JobsGlue")
     assert request["DefaultArguments"]["--env-MERGE_KEYS"] == "r_e_c_n_o"
     assert "fake-secret-not-forwarded" not in str(request)
-    s3.upload_file.assert_called_once()
+    expected_key = prefix + "releases/sc7/commit/42/bronze_to_silver.py"
+    s3.upload_file.assert_called_once_with("jobs/bronze_to_silver.py", "artifacts", expected_key)
+    assert request["Command"]["ScriptLocation"] == "s3://artifacts/" + expected_key
     glue.update_job.assert_not_called()
 
 

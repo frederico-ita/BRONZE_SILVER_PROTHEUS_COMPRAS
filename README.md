@@ -26,7 +26,9 @@ SILVER_BUCKET é obrigatório quando algum desses caminhos não começa com `s3:
 URIs completas são preservadas e podem apontar para buckets diferentes.
 SOURCE_BUCKET tem prioridade sobre BRONZE_BUCKET quando ambos estão definidos.
 Essas mesmas regras valem nas Variables do GitHub; o deploy envia os caminhos já
-resolvidos ao Glue. ARTIFACTS_BUCKET continua sendo somente o bucket do script.
+resolvidos ao Glue. ARTIFACTS_BUCKET aceita `nomebucket` ou `nomebucket/pasta`, sem `s3://`.
+Por exemplo, `meu-bucket/scripts` publica em
+`s3://meu-bucket/scripts/releases/<job>/<commit>/<execução>/bronze_to_silver.py`.
 SOURCE_KEY informa o objeto a processar e pode ser substituída por --source-key.
 SOURCE_VERSION_ID é opcional.
 
@@ -118,7 +120,8 @@ Falhas no job fazem o workflow falhar. Se o acompanhamento exceder 65 minutos, o
 falha e informa o ID; o job pode continuar executando e deve ser consultado no Glue.
 Consulte os logs do job no CloudWatch para diagnóstico.
 
-Permissões do principal de deploy: `s3:PutObject` no prefixo `releases/` do bucket de
+Permissões do principal de deploy: `s3:PutObject` no prefixo `<pasta>/releases/` (ou `releases/`
+quando não houver pasta configurada) do bucket de
 artefatos, `glue:GetJob`, `glue:CreateJob`, `glue:UpdateJob` no job e `iam:PassRole` para
 seu papel de execução. A role informada deve permitir que `glue.amazonaws.com` a assuma.
 Para o teste manual: `glue:StartJobRun` e `glue:GetJobRun`. Políticas de bucket e KMS,
