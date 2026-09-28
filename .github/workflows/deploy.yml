@@ -118,7 +118,8 @@ jobs:
           session = boto3.Session(region_name=os.environ["AWS_REGION"])
           glue = session.client("glue")
           name = os.environ["GLUE_JOB_NAME"]
-          bucket, _, prefix = os.environ["ARTIFACTS_BUCKET"].strip().partition("/")
+          destination = os.environ["ARTIFACTS_BUCKET"].strip().removeprefix("s3://")
+          bucket, _, prefix = destination.partition("/")
           key = f"releases/{name}/{os.environ['GITHUB_SHA']}/{os.environ['GITHUB_RUN_ID']}/bronze_to_silver.py"
           if prefix.strip("/"):
               key = prefix.strip("/") + "/" + key

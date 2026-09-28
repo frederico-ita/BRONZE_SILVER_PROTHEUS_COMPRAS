@@ -36,6 +36,8 @@ def workflow_deploy(tmp_path, monkeypatch, processing_env):
 @pytest.mark.parametrize("destination,prefix", [
     ("artifacts", ""), ("artifacts/scripts", "scripts/"),
     ("artifacts/scripts/", "scripts/"), ("artifacts/glue/sc7", "glue/sc7/"),
+    ("s3://artifacts", ""), ("s3://artifacts/scripts", "scripts/"),
+    (" s3://artifacts/glue/sc7/ ", "glue/sc7/"),
 ])
 def test_create_when_missing(workflow_deploy, destination, prefix):
     code, glue, s3, model = workflow_deploy

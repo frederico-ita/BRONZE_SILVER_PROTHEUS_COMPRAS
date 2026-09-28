@@ -26,7 +26,7 @@ SILVER_BUCKET é obrigatório quando algum desses caminhos não começa com `s3:
 URIs completas são preservadas e podem apontar para buckets diferentes.
 SOURCE_BUCKET tem prioridade sobre BRONZE_BUCKET quando ambos estão definidos.
 Essas mesmas regras valem nas Variables do GitHub; o deploy envia os caminhos já
-resolvidos ao Glue. ARTIFACTS_BUCKET aceita `nomebucket` ou `nomebucket/pasta`, sem `s3://`.
+resolvidos ao Glue. ARTIFACTS_BUCKET aceita `nomebucket`, `nomebucket/pasta` ou `s3://nomebucket/pasta`.
 Por exemplo, `meu-bucket/scripts` publica em
 `s3://meu-bucket/scripts/releases/<job>/<commit>/<execução>/bronze_to_silver.py`.
 SOURCE_KEY informa o objeto a processar e pode ser substituída por --source-key.
