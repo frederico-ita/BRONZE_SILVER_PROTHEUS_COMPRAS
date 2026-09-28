@@ -59,8 +59,8 @@ jobs:
       TEMP_PATH: ${{ vars.TEMP_PATH || secrets.TEMP_PATH }}
       S3_OUTPUT: ${{ vars.S3_OUTPUT || secrets.S3_OUTPUT }}
       WORKGROUP: ${{ vars.WORKGROUP || secrets.WORKGROUP }}
-      MERGE_KEYS: ${{ vars.MERGE_KEYS || secrets.MERGE_KEYS || 'r_e_c_n_o' }}
-      DELETION_COLUMN: ${{ vars.DELETION_COLUMN || secrets.DELETION_COLUMN || 'd_e_l_e_t_d' }}
+      MERGE_KEYS: ${{ vars.MERGE_KEYS || secrets.MERGE_KEYS || 'R_E_C_N_O_' }}
+      DELETION_COLUMN: ${{ vars.DELETION_COLUMN || secrets.DELETION_COLUMN || 'D_E_L_E_T_' }}
       DATE_COLUMN: ${{ vars.DATE_COLUMN || secrets.DATE_COLUMN || 'extraction_date' }}
       DATE_FORMAT: ${{ vars.DATE_FORMAT || secrets.DATE_FORMAT || 'ISO8601' }}
       CSV_SEPARATOR: ${{ vars.CSV_SEPARATOR || secrets.CSV_SEPARATOR || ';' }}

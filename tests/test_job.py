@@ -10,7 +10,8 @@ from tests.test_sc7 import record, sc7_config
 
 
 @pytest.mark.parametrize("value,expected", [("C7_NUM", "c7_num"), ("Data Extração", "data_extracao"),
-                                           ("extractionDate", "extraction_date")])
+                                           ("extractionDate", "extraction_date"),
+                                           ("D_E_L_E_T_", "d_e_l_e_t"), ("R_E_C_N_O_", "r_e_c_n_o")])
 def test_names(value, expected):
     assert job.snake_case(value) == expected
 
@@ -52,10 +53,10 @@ def test_transform_latest_partition_and_input(sc7_config, record):
     assert_frame_equal(source, original)
 
 
-@pytest.mark.parametrize("column,value", [("R_E_C_N_O", None), ("R_E_C_N_O", "1.5"),
-    ("R_E_C_N_O", "9223372036854775808"), ("C7_NUM", 123), ("C7_EMISSAO", "20260230"),
+@pytest.mark.parametrize("column,value", [("R_E_C_N_O_", None), ("R_E_C_N_O_", "1.5"),
+    ("R_E_C_N_O_", "9223372036854775808"), ("C7_NUM", 123), ("C7_EMISSAO", "20260230"),
     ("C7_EMISSAO", "2026111"), ("extraction_date", None), ("extraction_date", "invalid"),
-    ("D_E_L_E_T_D", None), ("D_E_L_E_T_D", "S")])
+    ("D_E_L_E_T_", None), ("D_E_L_E_T_", "S")])
 def test_invalid_rows(sc7_config, record, column, value):
     record[column] = value
     with pytest.raises((ValueError, TypeError, OverflowError)):
@@ -106,8 +107,8 @@ def test_invalid_source(sc7_config, bucket, key):
 
 
 def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
-    source = pd.DataFrame([record, dict(record, D_E_L_E_T_D="*", extraction_date="2026-09-29"),
-                           dict(record, R_E_C_N_O="2")])
+    source = pd.DataFrame([record, dict(record, D_E_L_E_T_="*", extraction_date="2026-09-29"),
+                           dict(record, R_E_C_N_O_="2")])
     target = {123456789: "old"}
     monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=source))
     monkeypatch.setattr(job.wr.catalog, "does_table_exist", Mock(return_value=True))
@@ -132,7 +133,7 @@ def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
 
 @pytest.mark.parametrize("exists", [True, False])
 def test_only_deletes(sc7_config, record, monkeypatch, exists):
-    record["D_E_L_E_T_D"] = "*"
+    record["D_E_L_E_T_"] = "*"
     monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=pd.DataFrame([record])))
     monkeypatch.setattr(job.wr.catalog, "does_table_exist", Mock(return_value=exists))
     writer, deleter = Mock(), Mock()

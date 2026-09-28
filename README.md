@@ -1,7 +1,7 @@
 # Bronze → Silver: SC7 com Python e Iceberg
 
 Script Python sem Spark, com pandas e awswrangler. Faz limpeza, deduplicação por
-R_E_C_N_O, merge no Iceberg e exclusão de registros marcados com *.
+R_E_C_N_O_, merge no Iceberg e exclusão de registros marcados com *.
 
 ## Configuração local
 
@@ -34,7 +34,7 @@ SOURCE_PREFIX, incluindo subpastas, um por vez. Não é necessário informar `*.
 SOURCE_KEY ou --source-key restringe a execução a um arquivo específico.
 SOURCE_VERSION_ID é opcional e só pode ser usado com um arquivo específico.
 
-Padrões configuráveis: MERGE_KEYS=r_e_c_n_o, DELETION_COLUMN=d_e_l_e_t_d,
+Padrões configuráveis: MERGE_KEYS=R_E_C_N_O_, DELETION_COLUMN=D_E_L_E_T_,
 DATE_COLUMN=extraction_date, DATE_FORMAT=ISO8601, CSV_SEPARATOR=";",
 ENCODING=utf-8, DECIMAL_SEPARATOR=. e formatos C7_EMISSAO_FORMAT/C7_DATPRF_FORMAT=%Y%m%d.
 
@@ -70,9 +70,10 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 - C7_EMISSAO e C7_DATPRF são datas. Branco/nulo vira nulo; datas inválidas causam erro.
 - extraction_date continua obrigatória além dos campos SC7 e define year/month/day em UTC.
 - Mantém a maior data por RECNO dentro do arquivo. Empates conflitantes e chaves nulas causam erro.
-- D_E_L_E_T_D em branco indica ativo; * remove a chave da silver. A deduplicação precede
+- D_E_L_E_T_ em branco indica ativo; * remove a chave da silver. A deduplicação precede
   essa separação. A extração precisa incluir linhas completas, inclusive as excluídas.
-- Se sua origem usa D_E_L_E_T_, configure DELETION_COLUMN=d_e_l_e_t.
+- Os campos de origem `D_E_L_E_T_` e `R_E_C_N_O_` são normalizados na silver para
+  `d_e_l_e_t` e `r_e_c_n_o`, respectivamente.
 - Uma tabela silver deve receber uma única origem física de SC7, evitando colisões de RECNO.
 
 Um arquivo específico pode ser CSV, Parquet, JSON tabular, JSONL ou NDJSON.

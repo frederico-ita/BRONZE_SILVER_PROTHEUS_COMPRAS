@@ -12,7 +12,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 DEFAULTS = {
-    "MERGE_KEYS": "r_e_c_n_o", "DELETION_COLUMN": "d_e_l_e_t_d",
+    "MERGE_KEYS": "R_E_C_N_O_", "DELETION_COLUMN": "D_E_L_E_T_",
     "DATE_COLUMN": "extraction_date", "DATE_FORMAT": "ISO8601",
     "CSV_SEPARATOR": ";", "ENCODING": "utf-8", "DECIMAL_SEPARATOR": ".",
     "C7_EMISSAO_FORMAT": "%Y%m%d", "C7_DATPRF_FORMAT": "%Y%m%d",
