@@ -7,7 +7,7 @@ R_E_C_N_O, merge no Iceberg e exclusão de registros marcados com *.
 
 Complete seu .env usando .env.example como referência, sem sobrescrever suas credenciais.
 O script agora usa variáveis de ambiente; não usa table.example.json nem configuração JSON no S3.
-O esquema das colunas fica em SC7_DTYPES, no script.
+O esquema das colunas fica em CODES, NUMBERS e DATES, no script.
 
 Variáveis obrigatórias: SOURCE_BUCKET (ou BRONZE_BUCKET), SOURCE_PREFIX, DATABASE, TABLE,
 TABLE_LOCATION, TEMP_PATH, S3_OUTPUT e WORKGROUP.
@@ -59,7 +59,7 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 ## Regras SC7
 
 - Códigos são texto, preservando zeros à esquerda; códigos já numéricos são rejeitados.
-- C7_QUANT, C7_QUJE, C7_PRECO e C7_TOTAL usam decimal(18,6), ajustável em SC7_DTYPES.
+- C7_QUANT, C7_QUJE, C7_PRECO e C7_TOTAL usam decimal(18,6), ajustável em CODES, NUMBERS e DATES.
   Não há arredondamento silencioso; separadores de milhar são rejeitados.
 - C7_EMISSAO e C7_DATPRF são datas. Branco/nulo vira nulo; datas inválidas causam erro.
 - extraction_date continua obrigatória além dos campos SC7 e define year/month/day em UTC.
@@ -75,9 +75,10 @@ no primeiro merge de ativos. Origem, destino, staging e resultados usam prefixos
 
 ## Primeiro teste AWS, sem EventBridge
 
-O deploy está em `.github/workflows/deploy.yml`, com implementação em
-`scripts/deploy_glue.py`. Não cria infraestrutura; exige um job Glue Python Shell 3.9
-já existente, com papel IAM configurado. Buckets, banco Glue e workgroup Athena engine 3
+Todo o CI/CD está em `.github/workflows/deploy.yml`, sem script separado de deploy.
+O workflow cria o job Glue Python Shell 3.9 quando ele não existe, usando a role existente
+informada em `AWS_ROLE_ARN`. Se já existe, atualiza o job e preserva sua role.
+Buckets, papel IAM, banco Glue e workgroup Athena engine 3
 também devem existir. O job precisa alcançar o índice pip para instalar dependências.
 
 No GitHub, configure o environment `production` com estes Secrets:
@@ -86,7 +87,8 @@ No GitHub, configure o environment `production` com estes Secrets:
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SESSION_TOKEN`, apenas se as credenciais forem temporárias.
 
-Configure em Variables ou Secrets `AWS_REGION`, `GLUE_JOB_NAME`, `ARTIFACTS_BUCKET` e todas as
+Configure em Variables ou Secrets `AWS_REGION`, `GLUE_JOB_NAME`, `ARTIFACTS_BUCKET`,
+`AWS_ROLE_ARN` (obrigatório para criar o job) e todas as
 variáveis obrigatórias de processamento listadas acima. As opcionais podem ser configuradas
 com os mesmos nomes; na ausência, o workflow aplica os padrões SC7.
 O `.env` pessoal não é publicado nem lido pelo deploy; suas configurações precisam ser
@@ -96,7 +98,8 @@ Credenciais AWS continuam exclusivamente em Secrets. Antes de autenticar, o work
 valida os campos obrigatórios e informa somente os nomes ausentes, sem imprimir valores.
 
 Após testes aprovados, um push em `main` publica somente o script em um caminho S3
-por commit/execução e atualiza o job existente. O deploy instala as dependências fixadas
+por commit/execução e cria ou atualiza o job. Um job novo usa Python Shell 3.9, 1 DPU,
+timeout de 60 minutos e uma execução por vez. O deploy instala as dependências fixadas
 de `requirements.txt` via `--additional-python-modules`, com `--library-set=none`.
 As configurações não secretas são enviadas como parâmetros `--env-NOME`; o script
 converte esses parâmetros em variáveis do processo antes de validar a configuração.
@@ -116,7 +119,8 @@ falha e informa o ID; o job pode continuar executando e deve ser consultado no G
 Consulte os logs do job no CloudWatch para diagnóstico.
 
 Permissões do principal de deploy: `s3:PutObject` no prefixo `releases/` do bucket de
-artefatos, `glue:GetJob`, `glue:UpdateJob` no job e `iam:PassRole` para seu papel de execução.
+artefatos, `glue:GetJob`, `glue:CreateJob`, `glue:UpdateJob` no job e `iam:PassRole` para
+seu papel de execução. A role informada deve permitir que `glue.amazonaws.com` a assuma.
 Para o teste manual: `glue:StartJobRun` e `glue:GetJobRun`. Políticas de bucket e KMS,
 se presentes, também precisam autorizar esse acesso.
 
@@ -159,4 +163,5 @@ Nenhum commit foi realizado.
 
 - [Bibliotecas e configuração do Glue Python Shell](https://docs.aws.amazon.com/glue/latest/dg/add-job-python.html)
 - [UpdateJob substitui a definição anterior](https://docs.aws.amazon.com/cli/latest/reference/glue/update-job.html)
+- [CreateJob cria o job e associa seu papel IAM](https://docs.aws.amazon.com/cli/latest/reference/glue/create-job.html)
 - [Autenticação AWS no GitHub Actions, incluindo access keys](https://github.com/aws-actions/configure-aws-credentials#non-oidc-authentication-options)

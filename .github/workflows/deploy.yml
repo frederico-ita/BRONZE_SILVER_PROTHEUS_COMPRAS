@@ -31,7 +31,7 @@ jobs:
           python-version: '3.9'
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest --cov=jobs --cov=scripts --cov-report=term-missing --cov-report=xml
+      - run: python -m pytest --cov=jobs --cov-report=term-missing --cov-report=xml
         env:
           AWS_EC2_METADATA_DISABLED: 'true'
       - uses: actions/upload-artifact@v4
@@ -47,6 +47,7 @@ jobs:
     environment: production
     env:
       AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
       GLUE_JOB_NAME: ${{ vars.GLUE_JOB_NAME || secrets.GLUE_JOB_NAME }}
       ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET || secrets.ARTIFACTS_BUCKET }}
       SOURCE_BUCKET: ${{ vars.SOURCE_BUCKET || secrets.SOURCE_BUCKET || vars.BRONZE_BUCKET || secrets.BRONZE_BUCKET }}
@@ -96,5 +97,87 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Publish script and update existing Glue job
-        run: python -m scripts.deploy_glue
+      - name: Publish script and create or update Glue job
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import boto3
+          from jobs.bronze_to_silver import PROCESSING_ENV_KEYS, load_config
+
+          config = load_config()
+          arguments = {"--env-" + key: str(config[key.lower()])
+                       for key in PROCESSING_ENV_KEYS if key.lower() in config}
+          arguments["--env-MERGE_KEYS"] = ",".join(config["merge_keys"])
+          for col in ["c7_emissao", "c7_datprf"]:
+              arguments["--env-" + col.upper() + "_FORMAT"] = config["column_date_formats"][col]
+          modules = Path("requirements.txt").read_text().splitlines()
+          arguments["--additional-python-modules"] = ",".join(line.strip() for line in modules if line.strip())
+          arguments["--library-set"] = "none"
+
+          session = boto3.Session(region_name=os.environ["AWS_REGION"])
+          glue = session.client("glue")
+          name = os.environ["GLUE_JOB_NAME"]
+          bucket = os.environ["ARTIFACTS_BUCKET"]
+          key = f"releases/{name}/{os.environ['GITHUB_SHA']}/{os.environ['GITHUB_RUN_ID']}/bronze_to_silver.py"
+          uri = f"s3://{bucket}/{key}"
+          try:
+              job = glue.get_job(JobName=name)["Job"]
+          except glue.exceptions.EntityNotFoundException:
+              job = None
+
+          if job is None:
+              role = os.environ.get("AWS_ROLE_ARN", "").strip()
+              if not role:
+                  raise ValueError("Cadastre AWS_ROLE_ARN em production para criar o job")
+              definition = {
+                  "Role": role,
+                  "Command": {"Name": "pythonshell", "PythonVersion": "3.9", "ScriptLocation": uri},
+                  "DefaultArguments": arguments, "MaxCapacity": 1,
+                  "Timeout": 60, "MaxRetries": 0, "ExecutionProperty": {"MaxConcurrentRuns": 1},
+              }
+          else:
+              command = job["Command"]
+              if command["Name"] != "pythonshell" or command.get("PythonVersion") != "3.9":
+                  raise ValueError("O job existente deve ser Python Shell 3.9")
+              managed = set(arguments) | {"--config-s3", "--env-file", "--source-bucket", "--source-key", "--source-version-id"}
+              if managed.intersection(job.get("NonOverridableArguments", {})):
+                  raise ValueError("NonOverridableArguments conflitam com o deploy")
+              fields = glue.meta.service_model.shape_for("JobUpdate").members
+              definition = {key: value for key, value in job.items() if key in fields}
+              definition["Command"] = dict(command, ScriptLocation=uri)
+              definition["DefaultArguments"] = {
+                  key: value for key, value in job.get("DefaultArguments", {}).items()
+                  if key not in managed and not key.startswith("--env-")
+              }
+              definition["DefaultArguments"].update(arguments)
+              definition["ExecutionProperty"] = {"MaxConcurrentRuns": 1}
+              if "MaxCapacity" in definition:
+                  definition.pop("AllocatedCapacity", None)
+
+          session.client("s3").upload_file("jobs/bronze_to_silver.py", bucket, key)
+          if job is None:
+              glue.create_job(Name=name, **definition)
+              print("Job Glue criado.")
+          else:
+              glue.update_job(JobName=name, JobUpdate=definition)
+              print("Job Glue atualizado.")
+          PY
+      - name: Run Glue job and wait for result
+        if: env.RUN_SOURCE_KEY != ''
+        run: |
+          set -euo pipefail
+          args=$(jq -n --arg key "$RUN_SOURCE_KEY" --arg version "$RUN_SOURCE_VERSION_ID" \
+            '{"--source-key": $key} + (if $version != "" then {"--source-version-id": $version} else {} end)')
+          run_id=$(aws glue start-job-run --job-name "$GLUE_JOB_NAME" --arguments "$args" --query JobRunId --output text)
+          echo "Glue JobRunId: $run_id"
+          for attempt in $(seq 1 130); do
+            state=$(aws glue get-job-run --job-name "$GLUE_JOB_NAME" --run-id "$run_id" --query JobRun.JobRunState --output text)
+            case "$state" in
+              SUCCEEDED) exit 0 ;;
+              STARTING|RUNNING|WAITING|STOPPING) sleep 30 ;;
+              *) echo "Execucao terminou com estado $state"; exit 1 ;;
+            esac
+          done
+          echo "Acompanhamento excedeu 65 minutos. Consulte a execucao $run_id no Glue; ela pode continuar ativa."
+          exit 1

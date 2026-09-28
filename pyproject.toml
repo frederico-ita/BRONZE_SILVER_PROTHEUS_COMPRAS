@@ -4,7 +4,7 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true
-source = ["jobs", "scripts"]
+source = ["jobs"]
 
 [tool.coverage.report]
 show_missing = true
