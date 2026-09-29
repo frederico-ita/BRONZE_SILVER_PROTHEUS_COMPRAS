@@ -117,10 +117,16 @@ def transform_file(frame, config):
     frame["r_e_c_n_o"] = pd.array(frame["r_e_c_n_o"].replace("", None), dtype="Int64")
     for col in DATES:
         if config["column_date_formats"][col] == "%Y%m%d" and frame[col].astype("string").str.fullmatch(r"\d{1,7}").any():
-            raise ValueError("Data deve usar YYYYMMDD")
-        frame[col] = pd.to_datetime(frame[col].replace("", None), format=config["column_date_formats"][col]).dt.date
+            raise ValueError(f"Data deve usar YYYYMMDD na coluna {col}")
+        try:
+            frame[col] = pd.to_datetime(frame[col].replace("", None), format=config["column_date_formats"][col]).dt.date
+        except (ValueError, OverflowError) as error:
+            raise ValueError(f"Erro na coluna {col}: {error}") from error
     date_col = config["date_column"]
-    dates = pd.to_datetime(frame[date_col].astype("string"), format=config["date_format"], utc=True)
+    try:
+        dates = pd.to_datetime(frame[date_col].astype("string"), format=config["date_format"], utc=True)
+    except (ValueError, OverflowError) as error:
+        raise ValueError(f"Erro na coluna {date_col}: {error}") from error
     if dates.isna().any() or not frame[config["deletion_column"]].isin(["", "*"]).all():
         raise ValueError("Data de extração ou marca de exclusão inválida")
     frame[date_col] = dates.dt.tz_localize(None).dt.floor("ms")

@@ -59,3 +59,30 @@ def test_c7_tipo_not_required(sc7_config, record):
     assert len(job.transform_file(pd.DataFrame([record]), sc7_config)) == 1
 
 
+@pytest.mark.parametrize("column,value", [
+    ("C7_EMISSAO", "29241003"),
+    ("C7_DATPRF", "29241003"),
+    ("extraction_date", "2924-10-03T00:00:00Z"),
+    ("C7_EMISSAO", "20260230"),
+    ("C7_DATPRF", "20260230"),
+    ("extraction_date", "data-invalida"),
+])
+def test_date_conversion_error_identifies_column(sc7_config, record, column, value):
+    record[column] = value
+    source = pd.DataFrame([record])
+    original = source.copy(deep=True)
+    with pytest.raises(ValueError, match=f"Erro na coluna {column.lower()}:") as caught:
+        job.transform_file(source, sc7_config)
+    cause = caught.value.__cause__
+    assert isinstance(cause, ValueError)
+    assert str(cause) in str(caught.value)
+    assert_frame_equal(source, original)
+
+
+@pytest.mark.parametrize("column", ["C7_EMISSAO", "C7_DATPRF"])
+def test_short_date_error_identifies_column(sc7_config, record, column):
+    record[column] = "2026103"
+    with pytest.raises(ValueError, match=f"Data deve usar YYYYMMDD na coluna {column.lower()}"):
+        job.transform_file(pd.DataFrame([record]), sc7_config)
+
+
