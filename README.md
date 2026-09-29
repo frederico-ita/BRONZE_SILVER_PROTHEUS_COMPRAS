@@ -35,7 +35,7 @@ SOURCE_KEY ou --source-key restringe a execução a um arquivo específico.
 SOURCE_VERSION_ID é opcional e só pode ser usado com um arquivo específico.
 
 Padrões configuráveis: MERGE_KEYS=R_E_C_N_O_, DELETION_COLUMN=D_E_L_E_T_,
-DATE_COLUMN=extraction_date, DATE_FORMAT=ISO8601, CSV_SEPARATOR=";",
+DATE_COLUMN=_airbyte_extracted_at, DATE_FORMAT=ISO8601, CSV_SEPARATOR=";",
 ENCODING=utf-8, DECIMAL_SEPARATOR=. e formatos C7_EMISSAO_FORMAT/C7_DATPRF_FORMAT=%Y%m%d.
 
 O .env do diretório de execução é carregado somente em main. Use --env-file para outro caminho.
@@ -68,8 +68,8 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 - C7_QUANT, C7_QUJE, C7_PRECO e C7_TOTAL usam decimal(18,6), ajustável em CODES, NUMBERS e DATES.
   Não há arredondamento silencioso; separadores de milhar são rejeitados.
 - C7_EMISSAO e C7_DATPRF são gravadas como texto, preservando valores inválidos e vazios. Nulos já presentes na origem permanecem nulos. Os parâmetros de formato dessas duas colunas não são aplicados nesta etapa.
-- extraction_date continua obrigatória além dos campos SC7 e define year/month/day em UTC.
-- Deduplica por RECNO dentro do arquivo, mantendo a última ocorrência na ordem de leitura, sem comparar extraction_date. Chaves nulas causam erro.
+- `_airbyte_extracted_at` é a coluna de origem obrigatória que define year/month/day em UTC. A normalização dos nomes a transforma em `airbyte_extracted_at` na silver. Configure `DATE_COLUMN=_airbyte_extracted_at` caso exista uma sobrescrita no ambiente ou no GitHub Actions.
+- Deduplica por RECNO dentro do arquivo, mantendo a última ocorrência na ordem de leitura, sem comparar _airbyte_extracted_at. Chaves nulas causam erro.
 - Se a tabela Iceberg existente tiver C7_EMISSAO/C7_DATPRF como date, será necessário adequar o schema antes de gravar texto. O job não migra tabelas existentes automaticamente.
 - D_E_L_E_T_ em branco indica ativo; * remove a chave da silver. A deduplicação precede
   essa separação. A extração precisa incluir linhas completas, inclusive as excluídas.
@@ -81,7 +81,7 @@ Um arquivo específico pode ser CSV, Parquet, JSON tabular, JSONL ou NDJSON.
 No modo por prefixo, somente Parquets são selecionados, com listagem paginada do S3.
 Um prefixo sem Parquets termina sem escrita e informa zero arquivos processados.
 Falhas interrompem a execução; arquivos já processados não são revertidos. A deduplicação
-continua por arquivo e não garante prioridade da extraction_date entre arquivos diferentes.
+continua por arquivo e não garante prioridade da _airbyte_extracted_at entre arquivos diferentes.
 Para rodar todos pelo console do Glue, publique o código atualizado e clique em Run sem
 o parâmetro --source-key. Se esse parâmetro foi cadastrado manualmente, remova-o.
 Buckets, banco Glue e workgroup Athena engine 3 precisam existir. A tabela Iceberg é criada

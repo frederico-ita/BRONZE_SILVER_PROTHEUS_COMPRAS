@@ -61,7 +61,7 @@ jobs:
       WORKGROUP: ${{ vars.WORKGROUP || secrets.WORKGROUP }}
       MERGE_KEYS: ${{ vars.MERGE_KEYS || secrets.MERGE_KEYS || 'R_E_C_N_O_' }}
       DELETION_COLUMN: ${{ vars.DELETION_COLUMN || secrets.DELETION_COLUMN || 'D_E_L_E_T_' }}
-      DATE_COLUMN: ${{ vars.DATE_COLUMN || secrets.DATE_COLUMN || 'extraction_date' }}
+      DATE_COLUMN: ${{ vars.DATE_COLUMN || secrets.DATE_COLUMN || '_airbyte_extracted_at' }}
       DATE_FORMAT: ${{ vars.DATE_FORMAT || secrets.DATE_FORMAT || 'ISO8601' }}
       CSV_SEPARATOR: ${{ vars.CSV_SEPARATOR || secrets.CSV_SEPARATOR || ';' }}
       ENCODING: ${{ vars.ENCODING || secrets.ENCODING || 'utf-8' }}

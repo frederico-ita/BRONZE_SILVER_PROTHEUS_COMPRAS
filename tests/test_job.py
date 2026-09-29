@@ -10,7 +10,7 @@ from tests.test_sc7 import record, sc7_config
 
 
 @pytest.mark.parametrize("value,expected", [("C7_NUM", "c7_num"), ("Data Extração", "data_extracao"),
-                                           ("extractionDate", "extraction_date"),
+                                           ("_airbyte_extracted_at", "airbyte_extracted_at"),
                                            ("D_E_L_E_T_", "d_e_l_e_t"), ("R_E_C_N_O_", "r_e_c_n_o")])
 def test_names(value, expected):
     assert job.snake_case(value) == expected
@@ -43,7 +43,7 @@ def test_decimal_separator():
 
 
 def test_transform_latest_partition_and_input(sc7_config, record):
-    newer = dict(record, C7_TOTAL="200", extraction_date="2026-09-30T23:30:00-03:00")
+    newer = dict(record, C7_TOTAL="200", _airbyte_extracted_at="2026-09-30T23:30:00-03:00")
     source = pd.DataFrame([record, newer, newer])
     original = source.copy(deep=True)
     result = job.transform_file(source, sc7_config)
@@ -55,7 +55,7 @@ def test_transform_latest_partition_and_input(sc7_config, record):
 
 @pytest.mark.parametrize("column,value", [("R_E_C_N_O_", None), ("R_E_C_N_O_", "1.5"),
     ("R_E_C_N_O_", "9223372036854775808"), ("C7_NUM", 123),
-    ("extraction_date", None), ("extraction_date", "invalid"),
+    ("_airbyte_extracted_at", None), ("_airbyte_extracted_at", "invalid"),
     ("D_E_L_E_T_", None), ("D_E_L_E_T_", "S")])
 def test_invalid_rows(sc7_config, record, column, value):
     record[column] = value
@@ -79,9 +79,9 @@ def test_optional_blanks(sc7_config, record):
     assert result.loc[0, "c7_datprf"] == ""
 
 
-@pytest.mark.parametrize("extraction_date", ["2026-09-28T18:20:30Z", "2020-01-01T00:00:00Z"])
-def test_deduplicate_recno_ignores_date(sc7_config, record, extraction_date):
-    last = dict(record, C7_TOTAL="200", extraction_date=extraction_date)
+@pytest.mark.parametrize("_airbyte_extracted_at", ["2026-09-28T18:20:30Z", "2020-01-01T00:00:00Z"])
+def test_deduplicate_recno_ignores_date(sc7_config, record, _airbyte_extracted_at):
+    last = dict(record, C7_TOTAL="200", _airbyte_extracted_at=_airbyte_extracted_at)
     other = dict(record, R_E_C_N_O_="2")
     result = job.transform_file(pd.DataFrame([record, other, last]), sc7_config)
     assert len(result) == 2
@@ -117,7 +117,7 @@ def test_invalid_source(sc7_config, bucket, key):
 
 
 def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
-    source = pd.DataFrame([record, dict(record, D_E_L_E_T_="*", extraction_date="2026-09-29"),
+    source = pd.DataFrame([record, dict(record, D_E_L_E_T_="*", _airbyte_extracted_at="2026-09-29"),
                            dict(record, R_E_C_N_O_="2")])
     target = {123456789: "old"}
     monkeypatch.setattr(job.wr.s3, "read_csv", Mock(return_value=source))

@@ -22,7 +22,7 @@ def record():
         "C7_PRECO": "12.123456", "C7_TOTAL": "127.296288", "C7_NUMSC": "000987",
         "C7_EMISSAO": "20260928", "C7_DATPRF": "20261005", "C7_LOCAL": "01",
         "C7_FORNECE": "000001", "C7_LOJA": "01", "D_E_L_E_T_": " ",
-        "R_E_C_N_O_": "123456789", "extraction_date": "2026-09-28T18:20:30Z",
+        "R_E_C_N_O_": "123456789", "_airbyte_extracted_at": "2026-09-28T18:20:30Z",
     }
 
 
@@ -44,6 +44,9 @@ def test_sc7_schema_and_no_mutation(sc7_config, record):
     assert row[["year", "month", "day"]].tolist() == [2026, 9, 28]
     assert_frame_equal(source, original)
     assert sc7_config["merge_keys"] == ["r_e_c_n_o"]
+    assert sc7_config["date_column"] == "airbyte_extracted_at"
+    assert "airbyte_extracted_at" in result.columns
+    assert "extraction_date" not in result.columns
 
 
 @pytest.mark.parametrize("value", [1, 1.0, "1", None])
@@ -60,13 +63,13 @@ def test_c7_tipo_not_required(sc7_config, record):
 
 
 @pytest.mark.parametrize("column,value", [
-    ("extraction_date", "data-invalida"),
+    ("_airbyte_extracted_at", "data-invalida"),
 ])
 def test_date_conversion_error_identifies_column(sc7_config, record, column, value):
     record[column] = value
     source = pd.DataFrame([record])
     original = source.copy(deep=True)
-    with pytest.raises(ValueError, match=f"Erro na coluna {column.lower()}:") as caught:
+    with pytest.raises(ValueError, match=f"Erro na coluna {job.snake_case(column)}:") as caught:
         job.transform_file(source, sc7_config)
     cause = caught.value.__cause__
     assert isinstance(cause, ValueError)
@@ -81,15 +84,15 @@ def test_business_dates_preserved_as_text(sc7_config, record, column, value):
     source = pd.DataFrame([record])
     original = source.copy(deep=True)
     result = job.transform_file(source, sc7_config)
-    actual = result.loc[0, column.lower()]
+    actual = result.loc[0, job.snake_case(column)]
     assert pd.isna(actual) if value is None else actual == str(value)
-    assert str(result[column.lower()].dtype) == "string"
-    assert sc7_config["dtype"][column.lower()] == "string"
+    assert str(result[job.snake_case(column)].dtype) == "string"
+    assert sc7_config["dtype"][job.snake_case(column)] == "string"
     assert_frame_equal(source, original)
 
 
 @pytest.mark.parametrize("column,value", [
-    ("extraction_date", "2924-10-03T00:00:00Z"),
+    ("_airbyte_extracted_at", "2924-10-03T00:00:00Z"),
 ])
 def test_dates_outside_nanosecond_range_preserved(sc7_config, record, column, value):
     import pyarrow as pa
@@ -98,9 +101,9 @@ def test_dates_outside_nanosecond_range_preserved(sc7_config, record, column, va
     source = pd.DataFrame([record])
     original = source.copy(deep=True)
     result = job.transform_file(source, sc7_config)
-    parsed = result.loc[0, column.lower()]
+    parsed = result.loc[0, job.snake_case(column)]
     assert (parsed.year, parsed.month, parsed.day) == (2924, 10, 3)
-    if column == "extraction_date":
+    if column == "_airbyte_extracted_at":
         assert result.loc[0, ["year", "month", "day"]].tolist() == [2924, 10, 3]
     assert pa.Table.from_pandas(result).num_rows == 1
     assert_frame_equal(source, original)
@@ -113,9 +116,9 @@ def test_date_fallback_preserves_null_and_timezone():
     assert dates.iloc[1:].isna().all()
 
 
-def test_extraction_date_fallback_custom_format(sc7_config, record):
+def test__airbyte_extracted_at_fallback_custom_format(sc7_config, record):
     sc7_config["date_format"] = "%Y%m%d"
-    record["extraction_date"] = "29241003"
+    record["_airbyte_extracted_at"] = "29241003"
     result = job.transform_file(pd.DataFrame([record]), sc7_config)
     assert result.loc[0, ["year", "month", "day"]].tolist() == [2924, 10, 3]
 

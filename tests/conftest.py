@@ -32,5 +32,5 @@ def config():
         "database": "silver", "table": "compras", "merge_keys": ["id"],
         "table_location": "s3://silver/iceberg/compras/",
         "temp_path": "s3://silver/staging/", "s3_output": "s3://silver/results/",
-        "workgroup": "silver", "date_column": "extraction_date",
+        "workgroup": "silver", "date_column": "airbyte_extracted_at",
     }
