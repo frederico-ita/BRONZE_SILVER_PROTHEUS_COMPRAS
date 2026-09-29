@@ -67,9 +67,10 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 - Códigos são texto, preservando zeros à esquerda; códigos já numéricos são rejeitados.
 - C7_QUANT, C7_QUJE, C7_PRECO e C7_TOTAL usam decimal(18,6), ajustável em CODES, NUMBERS e DATES.
   Não há arredondamento silencioso; separadores de milhar são rejeitados.
-- C7_EMISSAO e C7_DATPRF são datas. Branco/nulo vira nulo; datas inválidas causam erro.
+- C7_EMISSAO e C7_DATPRF são gravadas como texto, preservando valores inválidos e vazios. Nulos já presentes na origem permanecem nulos. Os parâmetros de formato dessas duas colunas não são aplicados nesta etapa.
 - extraction_date continua obrigatória além dos campos SC7 e define year/month/day em UTC.
-- Mantém a maior data por RECNO dentro do arquivo. Empates conflitantes e chaves nulas causam erro.
+- Deduplica por RECNO dentro do arquivo, mantendo a última ocorrência na ordem de leitura, sem comparar extraction_date. Chaves nulas causam erro.
+- Se a tabela Iceberg existente tiver C7_EMISSAO/C7_DATPRF como date, será necessário adequar o schema antes de gravar texto. O job não migra tabelas existentes automaticamente.
 - D_E_L_E_T_ em branco indica ativo; * remove a chave da silver. A deduplicação precede
   essa separação. A extração precisa incluir linhas completas, inclusive as excluídas.
 - Os campos de origem `D_E_L_E_T_` e `R_E_C_N_O_` são normalizados na silver para

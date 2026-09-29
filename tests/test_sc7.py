@@ -37,8 +37,8 @@ def test_sc7_schema_and_no_mutation(sc7_config, record):
     assert row["c7_quje"] == Decimal("2.000000")
     assert row["c7_preco"] == Decimal("12.123456")
     assert row["c7_total"] == Decimal("127.296288")
-    assert row["c7_emissao"] == date(2026, 9, 28)
-    assert row["c7_datprf"] == date(2026, 10, 5)
+    assert row["c7_emissao"] == "20260928"
+    assert row["c7_datprf"] == "20261005"
     assert row["r_e_c_n_o"] == 123456789
     assert row["d_e_l_e_t"] == ""
     assert row[["year", "month", "day"]].tolist() == [2026, 9, 28]
@@ -60,11 +60,6 @@ def test_c7_tipo_not_required(sc7_config, record):
 
 
 @pytest.mark.parametrize("column,value", [
-    ("C7_EMISSAO", "29241003"),
-    ("C7_DATPRF", "29241003"),
-    ("extraction_date", "2924-10-03T00:00:00Z"),
-    ("C7_EMISSAO", "20260230"),
-    ("C7_DATPRF", "20260230"),
     ("extraction_date", "data-invalida"),
 ])
 def test_date_conversion_error_identifies_column(sc7_config, record, column, value):
@@ -80,9 +75,48 @@ def test_date_conversion_error_identifies_column(sc7_config, record, column, val
 
 
 @pytest.mark.parametrize("column", ["C7_EMISSAO", "C7_DATPRF"])
-def test_short_date_error_identifies_column(sc7_config, record, column):
-    record[column] = "2026103"
-    with pytest.raises(ValueError, match=f"Data deve usar YYYYMMDD na coluna {column.lower()}"):
-        job.transform_file(pd.DataFrame([record]), sc7_config)
+@pytest.mark.parametrize("value", ["29241003", "20260230", "2026103", "invalida", "", " 20261003 ", 29241003, None])
+def test_business_dates_preserved_as_text(sc7_config, record, column, value):
+    record[column] = value
+    source = pd.DataFrame([record])
+    original = source.copy(deep=True)
+    result = job.transform_file(source, sc7_config)
+    actual = result.loc[0, column.lower()]
+    assert pd.isna(actual) if value is None else actual == str(value)
+    assert str(result[column.lower()].dtype) == "string"
+    assert sc7_config["dtype"][column.lower()] == "string"
+    assert_frame_equal(source, original)
+
+
+@pytest.mark.parametrize("column,value", [
+    ("extraction_date", "2924-10-03T00:00:00Z"),
+])
+def test_dates_outside_nanosecond_range_preserved(sc7_config, record, column, value):
+    import pyarrow as pa
+
+    record[column] = value
+    source = pd.DataFrame([record])
+    original = source.copy(deep=True)
+    result = job.transform_file(source, sc7_config)
+    parsed = result.loc[0, column.lower()]
+    assert (parsed.year, parsed.month, parsed.day) == (2924, 10, 3)
+    if column == "extraction_date":
+        assert result.loc[0, ["year", "month", "day"]].tolist() == [2924, 10, 3]
+    assert pa.Table.from_pandas(result).num_rows == 1
+    assert_frame_equal(source, original)
+
+
+def test_date_fallback_preserves_null_and_timezone():
+    dates = job.convert_dates(pd.Series(["2924-10-03T23:30:00-03:00", None, ""]), "ISO8601", utc=True)
+    assert dates.iloc[0].day == 4
+    assert dates.iloc[0].hour == 2
+    assert dates.iloc[1:].isna().all()
+
+
+def test_extraction_date_fallback_custom_format(sc7_config, record):
+    sc7_config["date_format"] = "%Y%m%d"
+    record["extraction_date"] = "29241003"
+    result = job.transform_file(pd.DataFrame([record]), sc7_config)
+    assert result.loc[0, ["year", "month", "day"]].tolist() == [2924, 10, 3]
 
 

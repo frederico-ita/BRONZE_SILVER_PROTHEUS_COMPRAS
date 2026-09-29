@@ -3,6 +3,7 @@ import argparse
 import os
 import re
 import unicodedata
+from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -64,7 +65,7 @@ def load_config(environ=None):
     config["column_date_formats"] = {col: config[col + "_format"] for col in DATES}
     config["dtype"] = dict.fromkeys(CODES + [config["deletion_column"]], "string")
     config["dtype"].update(dict.fromkeys(NUMBERS, "decimal(18,6)"))
-    config["dtype"].update(dict.fromkeys(DATES, "date"))
+    config["dtype"].update(dict.fromkeys(DATES, "string"))
     config["dtype"]["r_e_c_n_o"] = "bigint"
     return config
 
@@ -89,15 +90,27 @@ def decimal_value(value, separator):
     return number
 
 
-def remove_duplicates(frame, keys, date_column):
+def remove_duplicates(frame, keys):
     if not keys or frame[keys].isna().any().any() or frame[keys].eq("").any().any():
         raise ValueError("Chave de merge nula ou vazia")
-    frame = frame.drop_duplicates()
-    latest = frame.groupby(keys)[date_column].transform("max")
-    frame = frame.loc[frame[date_column].eq(latest)]
-    if frame.duplicated(keys).any():
-        raise ValueError("Mesma chave e data com valores conflitantes")
-    return frame.reset_index(drop=True)
+    return frame.drop_duplicates(subset=keys, keep="last").reset_index(drop=True)
+
+
+def convert_dates(values, date_format, utc=False):
+    """Tenta pandas; para datas fora do limite, usa datetime e milissegundos."""
+    try:
+        return pd.to_datetime(values, format=date_format, utc=utc)
+    except pd.errors.OutOfBoundsDatetime:
+        def parse(value):
+            if pd.isna(value) or value == "":
+                return None
+            text = str(value)
+            if date_format == "ISO8601":
+                return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return datetime.strptime(text, date_format)
+
+        return pd.Series([parse(value) for value in values], index=values.index,
+                         dtype="datetime64[ms, UTC]" if utc else "datetime64[ms]")
 
 
 def transform_file(frame, config):
@@ -107,7 +120,8 @@ def transform_file(frame, config):
         raise ValueError("Nomes de colunas inválidos ou duplicados")
     frame = frame.drop(columns=["c7_tipo"], errors="ignore")
     for col in frame.select_dtypes(include=["object", "string"]):
-        frame[col] = frame[col].map(clean_value)
+        if col not in DATES:
+            frame[col] = frame[col].map(clean_value)
     for col in CODES + [config["deletion_column"]]:
         if not frame[col].dropna().map(lambda value: isinstance(value, str)).all():
             raise ValueError("Código deve chegar como texto: " + col)
@@ -116,22 +130,17 @@ def transform_file(frame, config):
         frame[col] = frame[col].map(lambda value: decimal_value(value, config["decimal_separator"]))
     frame["r_e_c_n_o"] = pd.array(frame["r_e_c_n_o"].replace("", None), dtype="Int64")
     for col in DATES:
-        if config["column_date_formats"][col] == "%Y%m%d" and frame[col].astype("string").str.fullmatch(r"\d{1,7}").any():
-            raise ValueError(f"Data deve usar YYYYMMDD na coluna {col}")
-        try:
-            frame[col] = pd.to_datetime(frame[col].replace("", None), format=config["column_date_formats"][col]).dt.date
-        except (ValueError, OverflowError) as error:
-            raise ValueError(f"Erro na coluna {col}: {error}") from error
+        frame[col] = frame[col].astype("string")
     date_col = config["date_column"]
     try:
-        dates = pd.to_datetime(frame[date_col].astype("string"), format=config["date_format"], utc=True)
+        dates = convert_dates(frame[date_col].astype("string"), config["date_format"], utc=True)
     except (ValueError, OverflowError) as error:
         raise ValueError(f"Erro na coluna {date_col}: {error}") from error
     if dates.isna().any() or not frame[config["deletion_column"]].isin(["", "*"]).all():
         raise ValueError("Data de extração ou marca de exclusão inválida")
     frame[date_col] = dates.dt.tz_localize(None).dt.floor("ms")
     frame["year"], frame["month"], frame["day"] = dates.dt.year, dates.dt.month, dates.dt.day
-    return remove_duplicates(frame, config["merge_keys"], date_col)
+    return remove_duplicates(frame, config["merge_keys"])
 
 
 def read_file(bucket, key, config, session, version_id=None):

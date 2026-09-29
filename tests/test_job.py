@@ -54,8 +54,8 @@ def test_transform_latest_partition_and_input(sc7_config, record):
 
 
 @pytest.mark.parametrize("column,value", [("R_E_C_N_O_", None), ("R_E_C_N_O_", "1.5"),
-    ("R_E_C_N_O_", "9223372036854775808"), ("C7_NUM", 123), ("C7_EMISSAO", "20260230"),
-    ("C7_EMISSAO", "2026111"), ("extraction_date", None), ("extraction_date", "invalid"),
+    ("R_E_C_N_O_", "9223372036854775808"), ("C7_NUM", 123),
+    ("extraction_date", None), ("extraction_date", "invalid"),
     ("D_E_L_E_T_", None), ("D_E_L_E_T_", "S")])
 def test_invalid_rows(sc7_config, record, column, value):
     record[column] = value
@@ -76,12 +76,22 @@ def test_optional_blanks(sc7_config, record):
     record.update(C7_QUANT="", C7_DATPRF="")
     result = job.transform_file(pd.DataFrame([record]), sc7_config)
     assert pd.isna(result.loc[0, "c7_quant"])
-    assert pd.isna(result.loc[0, "c7_datprf"])
+    assert result.loc[0, "c7_datprf"] == ""
 
 
-def test_conflicting_ties(sc7_config, record):
-    with pytest.raises(ValueError, match="conflitantes"):
-        job.transform_file(pd.DataFrame([record, dict(record, C7_TOTAL="200")]), sc7_config)
+@pytest.mark.parametrize("extraction_date", ["2026-09-28T18:20:30Z", "2020-01-01T00:00:00Z"])
+def test_deduplicate_recno_ignores_date(sc7_config, record, extraction_date):
+    last = dict(record, C7_TOTAL="200", extraction_date=extraction_date)
+    other = dict(record, R_E_C_N_O_="2")
+    result = job.transform_file(pd.DataFrame([record, other, last]), sc7_config)
+    assert len(result) == 2
+    assert result.set_index("r_e_c_n_o").loc[123456789, "c7_total"] == Decimal("200")
+
+
+def test_deduplicate_does_not_require_date():
+    frame = pd.DataFrame({"r_e_c_n_o": [1, 2, 1], "value": ["a", "b", "c"]})
+    result = job.remove_duplicates(frame, ["r_e_c_n_o"])
+    assert result.to_dict("records") == [{"r_e_c_n_o": 2, "value": "b"}, {"r_e_c_n_o": 1, "value": "c"}]
 
 
 @pytest.mark.parametrize("extension,reader", [("csv", "read_csv"), ("parquet", "read_parquet"),
@@ -118,6 +128,9 @@ def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
         assert kw["partition_cols"] == ["year", "month", "day"]
         assert kw["merge_cols"] == ["r_e_c_n_o"]
         assert kw["merge_condition"] == "update"
+        for col in job.DATES:
+            assert kw["dtype"][col] == "string"
+            assert str(kw["df"][col].dtype) == "string"
         assert kw["fill_missing_columns_in_df"] is False
         target.update({key: "new" for key in kw["df"]["r_e_c_n_o"]})
     def delete(**kw):
