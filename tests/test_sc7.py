@@ -123,3 +123,38 @@ def test__airbyte_extracted_at_fallback_custom_format(sc7_config, record):
     assert result.loc[0, ["year", "month", "day"]].tolist() == [2924, 10, 3]
 
 
+@pytest.mark.parametrize("empty", [False, True])
+def test_no_object_columns_and_all_null_athena_schema(sc7_config, record, empty):
+    record["_airbyte_meta"] = None
+    record["C7_PRECO"] = None
+    source = pd.DataFrame([record])
+    if empty:
+        source = source.iloc[:0]
+    original = source.copy(deep=True)
+    result = job.transform_file(source, sc7_config)
+    assert not result.dtypes.eq(object).any()
+    assert str(result["airbyte_meta"].dtype) == "string"
+    assert result["airbyte_meta"].isna().all()
+    assert str(result["c7_preco"].dtype) == "decimal128(18, 6)[pyarrow]"
+    types, _ = job.wr.catalog.extract_athena_types(df=result, index=False)
+    assert types["airbyte_meta"] == "string"
+    assert types["c7_preco"] == "decimal(18,6)"
+    assert types["r_e_c_n_o"] == "bigint"
+    assert_frame_equal(source, original)
+
+
+def test_extra_object_columns_use_concrete_types(sc7_config, record):
+    source = pd.DataFrame([dict(record, extra_text=" abc ", extra_integer=7,
+                               extra_boolean=True, extra_mixed="abc"),
+                           dict(record, R_E_C_N_O_="2", extra_text=None, extra_integer=None,
+                                extra_boolean=None, extra_mixed=12)], dtype=object)
+    result = job.transform_file(source, sc7_config)
+    assert not result.dtypes.eq(object).any()
+    assert result["extra_text"].iloc[0] == "abc"
+    assert pd.api.types.is_numeric_dtype(result["extra_integer"])
+    assert result["extra_integer"].iloc[0] == 7
+    assert str(result["extra_boolean"].dtype) == "boolean"
+    assert result["extra_mixed"].tolist() == ["abc", "12"]
+    assert result["c7_preco"].iloc[0] == Decimal("12.123456")
+
+

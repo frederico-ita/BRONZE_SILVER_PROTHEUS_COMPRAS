@@ -10,6 +10,7 @@ from uuid import uuid4
 import awswrangler as wr
 import boto3
 import pandas as pd
+import pyarrow as pa
 from dotenv import load_dotenv
 
 DEFAULTS = {
@@ -129,7 +130,8 @@ def transform_file(frame, config):
             raise ValueError("Código deve chegar como texto: " + col)
         frame[col] = frame[col].astype("string")
     for col in NUMBERS:
-        frame[col] = frame[col].map(lambda value: decimal_value(value, config["decimal_separator"]))
+        values = frame[col].map(lambda value: decimal_value(value, config["decimal_separator"]))
+        frame[col] = pd.array(values, dtype=pd.ArrowDtype(pa.decimal128(18, 6)))
     frame["r_e_c_n_o"] = pd.array(frame["r_e_c_n_o"].replace("", None), dtype="Int64")
     for col in DATES:
         frame[col] = frame[col].astype("string")
@@ -142,6 +144,10 @@ def transform_file(frame, config):
         raise ValueError("Data de extração ou marca de exclusão inválida")
     frame[date_col] = dates.dt.tz_localize(None).dt.floor("ms")
     frame["year"], frame["month"], frame["day"] = dates.dt.year, dates.dt.month, dates.dt.day
+    for col in frame.columns[frame.dtypes.eq(object)]:
+        frame[col] = frame[col].convert_dtypes()
+        if frame[col].dtype == "object":
+            frame[col] = frame[col].astype("string")
     return remove_duplicates(frame, config["merge_keys"])
 
 
