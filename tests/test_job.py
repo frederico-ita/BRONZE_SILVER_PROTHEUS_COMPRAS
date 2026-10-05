@@ -132,6 +132,7 @@ def test_merge_delete_and_replay(sc7_config, record, monkeypatch):
             assert kw["dtype"][col] == "string"
             assert str(kw["df"][col].dtype) == "string"
         assert kw["fill_missing_columns_in_df"] is False
+        assert kw["schema_evolution"] is True
         target.update({key: "new" for key in kw["df"]["r_e_c_n_o"]})
     def delete(**kw):
         assert kw["df"].columns.tolist() == ["r_e_c_n_o"]

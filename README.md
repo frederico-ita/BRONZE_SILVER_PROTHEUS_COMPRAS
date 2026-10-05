@@ -7,7 +7,37 @@ R_E_C_N_O_, merge no Iceberg e exclusão de registros marcados com *.
 
 Complete seu .env usando .env.example como referência, sem sobrescrever suas credenciais.
 O script agora usa variáveis de ambiente; não usa table.example.json nem configuração JSON no S3.
-O esquema das colunas fica em CODES, NUMBERS e DATES, no script.
+As colunas selecionadas e seus nomes na silver ficam em `COLUMN_MAP`, no script.
+Os tratamentos de tipos ficam em CODES, NUMBERS e DATES.
+
+### Seleção, nomes e evolução do schema
+
+Edite `COLUMN_MAP` em `jobs/bronze_to_silver.py`: a chave é o nome de origem
+normalizado em snake_case e o valor é o nome desejado na silver. Exemplo:
+
+```python
+"c7_num": "numero_pedido",
+"c7_total": "valor_total",
+"s_t_a_m_p": "atualizado_em",
+```
+
+O exemplo não é aplicado automaticamente. Os nomes atuais foram preservados.
+Colunas extras do Parquet, como `s_t_a_m_p` e `airbyte_meta`, são ignoradas enquanto
+não forem incluídas no mapa. Cada coluna selecionada deve existir no arquivo.
+As chaves de merge, RECNO, marca de exclusão, data de extração e year/month/day
+são mantidas automaticamente. Para renomeá-las, inclua seus nomes normalizados
+no mesmo mapa; merge, exclusão, tipos e partições acompanham os nomes de destino.
+Os nomes de destino devem ser únicos e estar em snake_case.
+
+O envio usa `schema_evolution=True`: novas colunas selecionadas podem ser adicionadas
+à tabela existente; mudanças de tipo dependem da compatibilidade do Iceberg/Athena.
+Não se preenchem colunas ausentes com nulos (`fill_missing_columns_in_df=False`).
+Se a tabela existente contiver colunas fora do mapa, a gravação ainda pode falhar
+por colunas ausentes; a seleção não remove colunas já presentes no catálogo.
+Alterar um nome no mapa também não renomeia a coluna existente nem migra seu histórico:
+é necessário alinhar o schema da tabela antes de usar o novo nome. Isso vale também
+para nomes das chaves e das partições. Nenhuma tabela AWS é alterada pelo deploy;
+a evolução ocorre durante a execução do job.
 
 Variáveis obrigatórias: SOURCE_BUCKET (ou BRONZE_BUCKET), SOURCE_PREFIX, DATABASE, TABLE,
 TABLE_LOCATION, TEMP_PATH, S3_OUTPUT e WORKGROUP.

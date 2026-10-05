@@ -125,6 +125,7 @@ def test__airbyte_extracted_at_fallback_custom_format(sc7_config, record):
 
 @pytest.mark.parametrize("empty", [False, True])
 def test_no_object_columns_and_all_null_athena_schema(sc7_config, record, empty):
+    sc7_config["columns"]["airbyte_meta"] = "airbyte_meta"
     record["_airbyte_meta"] = None
     record["C7_PRECO"] = None
     source = pd.DataFrame([record])
@@ -144,6 +145,8 @@ def test_no_object_columns_and_all_null_athena_schema(sc7_config, record, empty)
 
 
 def test_extra_object_columns_use_concrete_types(sc7_config, record):
+    for col in ["extra_text", "extra_integer", "extra_boolean", "extra_mixed"]:
+        sc7_config["columns"][col] = col
     source = pd.DataFrame([dict(record, extra_text=" abc ", extra_integer=7,
                                extra_boolean=True, extra_mixed="abc"),
                            dict(record, R_E_C_N_O_="2", extra_text=None, extra_integer=None,

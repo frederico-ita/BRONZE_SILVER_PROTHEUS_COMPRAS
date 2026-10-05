@@ -24,6 +24,15 @@ PROCESSING_ENV_KEYS = [*REQUIRED, *DEFAULTS]
 CODES = "c7_filial c7_num c7_item c7_produto c7_numsc c7_local c7_fornece c7_loja".split()
 NUMBERS = "c7_quant c7_quje c7_preco c7_total".split()
 DATES = ["c7_emissao", "c7_datprf"]
+# Origem em snake_case: nome desejado na silver. Somente estas colunas e as
+# colunas tecnicas (chaves, exclusao, extracao e particoes) serao gravadas.
+COLUMN_MAP = {
+    "c7_filial": "c7_filial", "c7_num": "c7_num", "c7_item": "c7_item",
+    "c7_produto": "c7_produto", "c7_quant": "c7_quant", "c7_quje": "c7_quje",
+    "c7_preco": "c7_preco", "c7_total": "c7_total", "c7_numsc": "c7_numsc",
+    "c7_emissao": "c7_emissao", "c7_datprf": "c7_datprf", "c7_local": "c7_local",
+    "c7_fornece": "c7_fornece", "c7_loja": "c7_loja",
+}
 
 
 def snake_case(name):
@@ -70,6 +79,13 @@ def load_config(environ=None):
     config["dtype"].update(dict.fromkeys(NUMBERS, "decimal(18,6)"))
     config["dtype"].update(dict.fromkeys(DATES, "string"))
     config["dtype"]["r_e_c_n_o"] = "bigint"
+    config["columns"] = dict(COLUMN_MAP)
+    for col in [*config["merge_keys"], "r_e_c_n_o", config["deletion_column"],
+                config["date_column"], "year", "month", "day"]:
+        config["columns"].setdefault(col, col)
+    names = list(config["columns"].values())
+    if len(set(names)) != len(names) or any(not name or snake_case(name) != name for name in names):
+        raise ValueError("COLUMN_MAP: nomes de destino devem ser unicos e em snake_case")
     return config
 
 
@@ -121,20 +137,26 @@ def transform_file(frame, config):
     frame.columns = [snake_case(col) for col in frame.columns]
     if frame.columns.duplicated().any() or any(not col for col in frame.columns):
         raise ValueError("Nomes de colunas inválidos ou duplicados")
-    frame = frame.drop(columns=["c7_tipo"], errors="ignore")
+    selected = [col for col in config["columns"] if col not in {"year", "month", "day"}]
+    frame = frame.loc[:, selected].copy()
     for col in frame.select_dtypes(include=["object", "string"]):
         if col not in DATES:
             frame[col] = frame[col].map(clean_value)
     for col in CODES + [config["deletion_column"]]:
+        if col not in frame:
+            continue
         if not frame[col].dropna().map(lambda value: isinstance(value, str)).all():
             raise ValueError("Código deve chegar como texto: " + col)
         frame[col] = frame[col].astype("string")
     for col in NUMBERS:
+        if col not in frame:
+            continue
         values = frame[col].map(lambda value: decimal_value(value, config["decimal_separator"]))
         frame[col] = pd.array(values, dtype=pd.ArrowDtype(pa.decimal128(18, 6)))
     frame["r_e_c_n_o"] = pd.array(frame["r_e_c_n_o"].replace("", None), dtype="Int64")
     for col in DATES:
-        frame[col] = frame[col].astype("string")
+        if col in frame:
+            frame[col] = frame[col].astype("string")
     date_col = config["date_column"]
     try:
         dates = convert_dates(frame[date_col].astype("string"), config["date_format"], utc=True)
@@ -148,7 +170,8 @@ def transform_file(frame, config):
         frame[col] = frame[col].convert_dtypes()
         if frame[col].dtype == "object":
             frame[col] = frame[col].astype("string")
-    return remove_duplicates(frame, config["merge_keys"])
+    frame = remove_duplicates(frame, config["merge_keys"])
+    return frame.loc[:, list(config["columns"])].rename(columns=config["columns"])
 
 
 def read_file(bucket, key, config, session, version_id=None):
@@ -168,15 +191,18 @@ def read_file(bucket, key, config, session, version_id=None):
 
 def process_file(bucket, key, config, session, version_id=None):
     frame = transform_file(read_file(bucket, key, config, session, version_id), config)
-    deleted = frame[config["deletion_column"]].eq("*")
-    active, removed = frame.loc[~deleted], frame.loc[deleted, config["merge_keys"]]
+    columns = config["columns"]
+    merge_keys = [columns[col] for col in config["merge_keys"]]
+    deleted = frame[columns[config["deletion_column"]]].eq("*")
+    active, removed = frame.loc[~deleted], frame.loc[deleted, merge_keys]
     options = {key: config[key] for key in ["database", "table", "s3_output", "workgroup"]}
     options.update(temp_path=config["temp_path"].rstrip("/") + "/" + uuid4().hex + "/",
-                   merge_cols=config["merge_keys"], keep_files=False, boto3_session=session)
+                   merge_cols=merge_keys, keep_files=False, boto3_session=session)
     if not active.empty:
         wr.athena.to_iceberg(df=active, **options, table_location=config["table_location"],
-                            partition_cols=["year", "month", "day"], merge_condition="update",
-                            dtype=config["dtype"], schema_evolution=False, fill_missing_columns_in_df=False)
+                            partition_cols=[columns[col] for col in ["year", "month", "day"]],
+                            merge_condition="update", schema_evolution=True, fill_missing_columns_in_df=False,
+                            dtype={columns[col]: dtype for col, dtype in config["dtype"].items() if col in columns})
     if not removed.empty and wr.catalog.does_table_exist(
         database=config["database"], table=config["table"], boto3_session=session
     ):
