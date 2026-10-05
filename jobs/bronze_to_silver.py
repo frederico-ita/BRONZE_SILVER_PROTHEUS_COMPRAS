@@ -31,7 +31,7 @@ def snake_case(name):
     return re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
 
 
-def resolve_s3_path(path, bucket=None):
+def resolve_s3_path(path, bucket=None, allow_bucket_root=False):
     path = path.strip()
     if "://" in path and not path.startswith("s3://"):
         raise ValueError("Use um prefixo ou URI s3://")
@@ -39,6 +39,8 @@ def resolve_s3_path(path, bucket=None):
         if not bucket or not re.fullmatch(r"[a-z0-9.-]+", bucket):
             raise ValueError("SILVER_BUCKET deve conter o nome do bucket")
         path = "s3://" + bucket + "/" + path.lstrip("/")
+    if allow_bucket_root and re.fullmatch(r"s3://[a-z0-9.-]+/?", path):
+        return path.rstrip("/") + "/"
     if not re.fullmatch(r"s3://[a-z0-9.-]+/[^:/].*", path):
         raise ValueError("Caminho S3 deve conter bucket e prefixo")
     return path
@@ -52,7 +54,7 @@ def load_config(environ=None):
         raise ValueError("Variáveis obrigatórias: " + ", ".join(missing))
     config = {key.lower(): env.get(key, DEFAULTS.get(key, "")).strip() for key in PROCESSING_ENV_KEYS}
     for key in ["table_location", "temp_path", "s3_output"]:
-        config[key] = resolve_s3_path(config[key], env.get("SILVER_BUCKET"))
+        config[key] = resolve_s3_path(config[key], env.get("SILVER_BUCKET"), allow_bucket_root=key == "s3_output")
     paths = [config[k].rstrip("/") + "/" for k in ["table_location", "temp_path", "s3_output"]]
     paths.append("s3://" + config["source_bucket"] + "/" + config["source_prefix"])
     if not config["source_prefix"].endswith("/") or any(

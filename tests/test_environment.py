@@ -75,6 +75,25 @@ def test_relative_overlapping_paths_rejected(processing_env):
         job.load_config(processing_env)
 
 
+@pytest.mark.parametrize("path", ["s3://results", "s3://results/"])
+def test_query_results_bucket_root(processing_env, path):
+    processing_env["S3_OUTPUT"] = path
+    assert job.load_config(processing_env)["s3_output"] == "s3://results/"
+
+
+@pytest.mark.parametrize("key", ["TABLE_LOCATION", "TEMP_PATH"])
+def test_data_and_staging_still_require_prefix(processing_env, key):
+    processing_env[key] = "s3://silver/"
+    with pytest.raises(ValueError):
+        job.load_config(processing_env)
+
+
+def test_query_results_root_cannot_overlap_staging(processing_env):
+    processing_env["S3_OUTPUT"] = "s3://silver/"
+    with pytest.raises(ValueError, match="separados"):
+        job.load_config(processing_env)
+
+
 def test_local_dotenv_precedence_and_credentials_not_in_config(tmp_path, processing_env, monkeypatch):
     env_file = tmp_path / "synthetic.env"
     values = dict(processing_env, SOURCE_KEY="compras/sc7/local.csv", SOURCE_VERSION_ID="v2",
