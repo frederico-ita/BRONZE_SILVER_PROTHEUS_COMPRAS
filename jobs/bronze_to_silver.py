@@ -225,7 +225,9 @@ def validate_schema(frame, expected, config):
         if old != new and (old, new) not in {("int", "bigint"), ("float", "double")} and not widening:
             incompatible[col] = (old, new)
     if missing or incompatible:
-        raise ValueError(f"Schema incompativel antes da escrita: ausentes={missing}; tipos={incompatible}")
+        raise ValueError(f"Schema incompativel antes da escrita: {len(missing)} colunas da tabela fora do envio "
+                         f"(primeiras 5: {missing[:5]}); tipos={incompatible}. "
+                         "Alinhe o schema Iceberg ao COLUMN_MAP antes de executar novamente.")
     return actual
 
 
@@ -234,7 +236,8 @@ def process_batch(bucket, sources, config, session):
     if not sources:
         return 0
     expected = wr.catalog.get_table_types(database=config["database"], table=config["table"],
-                                          boto3_session=session) or {}
+                                          filter_iceberg_current=True, boto3_session=session) or {}
+    original_schema = expected.copy()
     with TemporaryDirectory(prefix="silver-validation-") as folder:
         paths = []
         for key, version in sources:
@@ -253,6 +256,10 @@ def process_batch(bucket, sources, config, session):
                 paths.append(path)
             except Exception as error:
                 raise ValueError(f"Validacao falhou no arquivo {key}: {error}") from error
+        current_schema = wr.catalog.get_table_types(database=config["database"], table=config["table"],
+                                                   filter_iceberg_current=True, boto3_session=session) or {}
+        if current_schema != original_schema:
+            raise ValueError("Schema da tabela mudou durante a validacao; nenhuma escrita iniciada. Execute novamente.")
         print(f"Validacao concluida: {len(sources)} arquivos. Iniciando escrita.")
         # Le somente os arquivos locais produzidos acima, nunca pickle da origem.
         return sum(write_frame(pd.read_pickle(path), config, session) for path in paths)

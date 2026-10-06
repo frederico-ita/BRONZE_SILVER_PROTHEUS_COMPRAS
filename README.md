@@ -114,6 +114,9 @@ Um prefixo sem Parquets termina sem escrita e informa zero arquivos processados.
 Antes de escrever, o job lê e transforma todos os arquivos selecionados, verifica os
 tipos e as colunas contra o catálogo Glue e contra os arquivos anteriores do lote,
 e verifica o limite de 100 partições por arquivo com registros ativos.
+Somente colunas atuais do Iceberg entram nessa comparação (`filter_iceberg_current=True`);
+o Glue pode manter colunas removidas marcadas como históricas. Antes da primeira
+escrita, o job consulta novamente o schema e interrompe se ele mudou durante a validação.
 Os frames validados ficam em arquivos temporários locais do Glue; a gravação usa
 esses mesmos frames, sem reler a bronze. Nenhum merge, exclusão ou alteração de schema
 é iniciado se essa validação falhar. O erro identifica o arquivo responsável.

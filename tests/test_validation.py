@@ -36,6 +36,8 @@ def test_all_files_read_once_before_write_and_local_files_removed(sc7_config, re
     monkeypatch.setattr(pd, "read_pickle", restore)
     assert job.process_batch("bronze", [("a", None), ("b", None)], sc7_config, Mock()) == 2
     assert events == ["read", "read", "write", "write"]
+    assert all(call.kwargs["filter_iceberg_current"] is True
+               for call in job.wr.catalog.get_table_types.call_args_list)
     assert all(not path.exists() for path in paths)
 
 
@@ -89,4 +91,47 @@ def test_partition_limit_before_write(sc7_config, record, monkeypatch):
     monkeypatch.setattr(job, "write_frame", writer)
     with pytest.raises(ValueError, match="100 particoes"):
         job.process_file("bronze", "a", sc7_config, Mock())
+    writer.assert_not_called()
+
+
+def test_catalog_changes_during_validation_prevent_write(sc7_config, record, monkeypatch):
+    monkeypatch.setattr(job.wr.catalog, "get_table_types", Mock(side_effect=[None, {"new": "string"}]))
+    monkeypatch.setattr(job, "read_file", Mock(return_value=pd.DataFrame([record])))
+    writer = Mock()
+    monkeypatch.setattr(job, "write_frame", writer)
+    with pytest.raises(ValueError, match="mudou durante"):
+        job.process_file("bronze", "a", sc7_config, Mock())
+    writer.assert_not_called()
+
+
+def test_historical_columns_are_ignored_after_schema_migration(sc7_config, record, monkeypatch):
+    # Simula o Glue mantendo uma coluna removida no historico do catalogo.
+    def catalog(**kwargs):
+        return {} if kwargs.get("filter_iceberg_current") else {"removed_column": "string"}
+    monkeypatch.setattr(job.wr.catalog, "get_table_types", Mock(side_effect=catalog))
+    monkeypatch.setattr(job, "read_file", Mock(return_value=pd.DataFrame([record])))
+    writer = Mock(return_value=1)
+    monkeypatch.setattr(job, "write_frame", writer)
+    assert job.process_file("bronze", "a", sc7_config, Mock()) == 1
+    writer.assert_called_once()
+
+
+def test_local_disk_failure_prevents_all_writes(sc7_config, record, monkeypatch):
+    monkeypatch.setattr(job, "read_file", Mock(return_value=pd.DataFrame([record])))
+    monkeypatch.setattr(pd.DataFrame, "to_pickle", Mock(side_effect=OSError("No space left")))
+    writer = Mock()
+    monkeypatch.setattr(job, "write_frame", writer)
+    with pytest.raises(ValueError, match="No space left"):
+        job.process_file("bronze", "a", sc7_config, Mock())
+    writer.assert_not_called()
+
+
+def test_catalog_access_failure_prevents_all_writes(sc7_config, monkeypatch):
+    monkeypatch.setattr(job.wr.catalog, "get_table_types", Mock(side_effect=RuntimeError("AccessDenied")))
+    reader, writer = Mock(), Mock()
+    monkeypatch.setattr(job, "read_file", reader)
+    monkeypatch.setattr(job, "write_frame", writer)
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        job.process_file("bronze", "a", sc7_config, Mock())
+    reader.assert_not_called()
     writer.assert_not_called()
