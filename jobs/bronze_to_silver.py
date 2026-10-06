@@ -5,6 +5,8 @@ import re
 import unicodedata
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 import awswrangler as wr
@@ -189,8 +191,7 @@ def read_file(bucket, key, config, session, version_id=None):
     raise ValueError("Formato não suportado: " + extension)
 
 
-def process_file(bucket, key, config, session, version_id=None):
-    frame = transform_file(read_file(bucket, key, config, session, version_id), config)
+def write_frame(frame, config, session):
     columns = config["columns"]
     merge_keys = [columns[col] for col in config["merge_keys"]]
     deleted = frame[columns[config["deletion_column"]]].eq("*")
@@ -210,19 +211,70 @@ def process_file(bucket, key, config, session, version_id=None):
     return len(active)
 
 
+def validate_schema(frame, expected, config):
+    """Compara tipos sem executar DDL ou escrever no S3."""
+    dtype = {config["columns"][col]: kind for col, kind in config["dtype"].items()
+             if col in config["columns"]}
+    actual, _ = wr.catalog.extract_athena_types(df=frame, index=False, dtype=dtype)
+    missing = sorted(set(expected) - set(actual))
+    incompatible = {}
+    for col in set(expected) & set(actual):
+        old, new = expected[col].replace(" ", ""), actual[col].replace(" ", "")
+        decimals = [re.fullmatch(r"decimal\((\d+),(\d+)\)", kind) for kind in [old, new]]
+        widening = all(decimals) and decimals[0][2] == decimals[1][2] and int(decimals[0][1]) <= int(decimals[1][1])
+        if old != new and (old, new) not in {("int", "bigint"), ("float", "double")} and not widening:
+            incompatible[col] = (old, new)
+    if missing or incompatible:
+        raise ValueError(f"Schema incompativel antes da escrita: ausentes={missing}; tipos={incompatible}")
+    return actual
+
+
+def process_batch(bucket, sources, config, session):
+    """Valida o lote inteiro e guarda os frames em disco local antes de escrever."""
+    if not sources:
+        return 0
+    expected = wr.catalog.get_table_types(database=config["database"], table=config["table"],
+                                          boto3_session=session) or {}
+    with TemporaryDirectory(prefix="silver-validation-") as folder:
+        paths = []
+        for key, version in sources:
+            try:
+                frame = transform_file(read_file(bucket, key, config, session, version), config)
+                if frame.empty:
+                    continue
+                active = frame.loc[frame[config["columns"][config["deletion_column"]]].eq("")]
+                if not active.empty:
+                    expected = validate_schema(active, expected, config)
+                    partitions = [config["columns"][col] for col in ["year", "month", "day"]]
+                    if len(active[partitions].drop_duplicates()) > 100:
+                        raise ValueError("Mais de 100 particoes no arquivo")
+                path = Path(folder) / f"{len(paths)}.pkl"
+                frame.to_pickle(path)
+                paths.append(path)
+            except Exception as error:
+                raise ValueError(f"Validacao falhou no arquivo {key}: {error}") from error
+        print(f"Validacao concluida: {len(sources)} arquivos. Iniciando escrita.")
+        # Le somente os arquivos locais produzidos acima, nunca pickle da origem.
+        return sum(write_frame(pd.read_pickle(path), config, session) for path in paths)
+
+
+def process_file(bucket, key, config, session, version_id=None):
+    return process_batch(bucket, [(key, version_id)], config, session)
+
+
 def process_prefix(config, session):
-    """Processa os Parquets do prefixo, inclusive subpastas, um por vez."""
+    """Lista todos os Parquets e valida o lote antes da primeira escrita."""
     bucket = config["source_bucket"]
     pages = session.client("s3").get_paginator("list_objects_v2").paginate(
         Bucket=bucket, Prefix=config["source_prefix"]
     )
-    files, rows = 0, 0
+    sources = []
     for page in pages:
         for item in page.get("Contents", []):
             if item["Key"].lower().endswith(".parquet"):
-                rows += process_file(bucket, item["Key"], config, session)
-                files += 1
-    print(f"Arquivos Parquet processados: {files}; registros enviados ao merge: {rows}")
+                sources.append((item["Key"], None))
+    rows = process_batch(bucket, sources, config, session)
+    print(f"Arquivos Parquet processados: {len(sources)}; registros enviados ao merge: {rows}")
     return rows
 
 

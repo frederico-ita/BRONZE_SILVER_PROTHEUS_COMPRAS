@@ -60,7 +60,8 @@ resolvidos ao Glue. ARTIFACTS_BUCKET aceita `nomebucket`, `nomebucket/pasta` ou 
 Por exemplo, `meu-bucket/scripts` publica em
 `s3://meu-bucket/scripts/releases/<job>/<commit>/<execução>/bronze_to_silver.py`.
 Sem SOURCE_KEY nem --source-key, o job processa todos os arquivos `.parquet` do
-SOURCE_PREFIX, incluindo subpastas, um por vez. Não é necessário informar `*.parquet`.
+SOURCE_PREFIX, incluindo subpastas. Valida o lote inteiro antes de iniciar a escrita.
+Não é necessário informar `*.parquet`.
 SOURCE_KEY ou --source-key restringe a execução a um arquivo específico.
 SOURCE_VERSION_ID é opcional e só pode ser usado com um arquivo específico.
 
@@ -110,7 +111,23 @@ mocks e bloqueio de conexões de rede. Não validam o engine Athena real.
 Um arquivo específico pode ser CSV, Parquet, JSON tabular, JSONL ou NDJSON.
 No modo por prefixo, somente Parquets são selecionados, com listagem paginada do S3.
 Um prefixo sem Parquets termina sem escrita e informa zero arquivos processados.
-Falhas interrompem a execução; arquivos já processados não são revertidos. A deduplicação
+Antes de escrever, o job lê e transforma todos os arquivos selecionados, verifica os
+tipos e as colunas contra o catálogo Glue e contra os arquivos anteriores do lote,
+e verifica o limite de 100 partições por arquivo com registros ativos.
+Os frames validados ficam em arquivos temporários locais do Glue; a gravação usa
+esses mesmos frames, sem reler a bronze. Nenhum merge, exclusão ou alteração de schema
+é iniciado se essa validação falhar. O erro identifica o arquivo responsável.
+Essa regra também vale para a execução de um único arquivo.
+
+O lote precisa caber no disco temporário disponível, e cada arquivo precisa caber
+na memória. Os temporários locais são removidos ao sair da etapa, inclusive em
+exceções normais. Arquivos que chegam à bronze depois da listagem ficam para a
+próxima execução. A validação não testa gravações AWS, permissões de escrita nem
+impede alterações concorrentes na tabela: falhas nessas etapas ainda são possíveis.
+Ela não migra o schema antigo: colunas da tabela ausentes no mapa impedem a escrita
+até que a migração da tabela seja concluída.
+
+Falhas durante a escrita interrompem a execução; gravações já confirmadas não são revertidas. A deduplicação
 continua por arquivo e não garante prioridade da _airbyte_extracted_at entre arquivos diferentes.
 Para rodar todos pelo console do Glue, publique o código atualizado e clique em Run sem
 o parâmetro --source-key. Se esse parâmetro foi cadastrado manualmente, remova-o.
@@ -201,8 +218,9 @@ Nenhum commit foi realizado.
 - Merge e delete são operações separadas; leitores podem observar estado intermediário.
   Uma falha propaga erro para permitir reprocessamento. Snapshots antigos não são expurgados.
 - Não há controle de concorrência ou orquestração nesta etapa; evite escritores simultâneos.
-- Cada arquivo precisa caber na memória. Mais de 100 partições escritas por consulta Athena
-  exigem divisão em lotes, ainda não implementada.
+- Cada arquivo precisa caber na memória e o lote transformado precisa caber no disco
+  temporário local. Arquivos ativos com mais de 100 partições são rejeitados antes
+  da escrita; divisão em lotes ainda não foi implementada.
 - Não há manutenção de snapshots, compactação ou limpeza automática de staging após falhas.
 
 ## Referências do deploy

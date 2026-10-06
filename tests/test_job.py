@@ -209,23 +209,23 @@ def test_prefix_paginates_and_filters(sc7_config, monkeypatch):
                       {"Key": "compras/sc7/sub/"}]},
         {}, {"Contents": [{"Key": "compras/sc7/sub/b.PARQUET"}]},
     ]
-    process = Mock(side_effect=[2, 3])
-    monkeypatch.setattr(job, "process_file", process)
+    process = Mock(return_value=5)
+    monkeypatch.setattr(job, "process_batch", process)
     assert job.process_prefix(sc7_config, session) == 5
     session.client.assert_called_once_with("s3")
     session.client.return_value.get_paginator.assert_called_once_with("list_objects_v2")
     paginator.paginate.assert_called_once_with(Bucket="bronze", Prefix="compras/sc7/")
-    assert [call.args[1] for call in process.call_args_list] == [
-        "compras/sc7/a.parquet", "compras/sc7/sub/b.PARQUET"]
+    assert process.call_args.args[1] == [
+        ("compras/sc7/a.parquet", None), ("compras/sc7/sub/b.PARQUET", None)]
 
 
 def test_empty_prefix(sc7_config, monkeypatch, capsys):
     session = Mock()
     session.client.return_value.get_paginator.return_value.paginate.return_value = [{}]
-    process = Mock()
-    monkeypatch.setattr(job, "process_file", process)
+    process = Mock(return_value=0)
+    monkeypatch.setattr(job, "process_batch", process)
     assert job.process_prefix(sc7_config, session) == 0
-    process.assert_not_called()
+    assert process.call_args.args[1] == []
     assert "Parquet processados: 0" in capsys.readouterr().out
 
 
@@ -235,7 +235,7 @@ def test_prefix_stops_on_processing_error(sc7_config, monkeypatch):
         {"Contents": [{"Key": "compras/sc7/a.parquet"}, {"Key": "compras/sc7/b.parquet"}]}
     ]
     process = Mock(side_effect=RuntimeError("Falha na leitura"))
-    monkeypatch.setattr(job, "process_file", process)
+    monkeypatch.setattr(job, "process_batch", process)
     with pytest.raises(RuntimeError):
         job.process_prefix(sc7_config, session)
     process.assert_called_once()

@@ -39,6 +39,7 @@ def test_renaming_preserves_types_merge_delete_and_partitions(processing_env, re
                "d_e_l_e_t": "excluido", "airbyte_extracted_at": "extraido_em", "year": "ano"}
     monkeypatch.setattr(job, "COLUMN_MAP", dict(job.COLUMN_MAP, **aliases))
     config = job.load_config(processing_env)
+    monkeypatch.setattr(job.wr.catalog, "get_table_types", Mock(return_value=None))
     source = pd.DataFrame([record, dict(record, R_E_C_N_O_="2", D_E_L_E_T_="*")])
     monkeypatch.setattr(job, "read_file", Mock(return_value=source))
     writer, deleter = Mock(), Mock()

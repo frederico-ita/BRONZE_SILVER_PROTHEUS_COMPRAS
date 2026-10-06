@@ -10,7 +10,8 @@ from jobs import bronze_to_silver as job
 
 
 @pytest.fixture
-def sc7_config(processing_env):
+def sc7_config(processing_env, monkeypatch):
+    monkeypatch.setattr(job.wr.catalog, "get_table_types", Mock(return_value=None))
     return job.load_config(processing_env)
 
 
